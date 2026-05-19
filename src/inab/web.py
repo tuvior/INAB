@@ -8,6 +8,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import uvicorn
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -47,7 +48,7 @@ def create_app(
     store = store or Store(settings.database_path)
     gateway_factory = gateway_factory or _default_gateway_factory
 
-    app = FastAPI(title="INAB", docs_url=None, redoc_url=None)
+    app = FastAPI(title="INAB", docs_url=None, redoc_url=None, root_path=settings.root_path)
     app.state.settings = settings
     app.state.store = store
     app.state.gateway_factory = gateway_factory
@@ -56,7 +57,7 @@ def create_app(
 
     @app.exception_handler(LoginRequired)
     async def login_required_handler(request: Request, exc: LoginRequired) -> RedirectResponse:
-        return RedirectResponse(f"/login?next={request.url.path}", status_code=303)
+        return _redirect(request, f"/login?next={quote(request.url.path)}")
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
@@ -75,16 +76,23 @@ def create_app(
         if not (username_ok and password_ok):
             return _render(request, "login.html", {"error": "Invalid username or password.", "next": next}, status_code=401)
         request.session["authenticated"] = True
-        return RedirectResponse(_safe_next(next), status_code=303)
+        return _redirect(request, _safe_next(next))
 
     @app.post("/logout")
     async def logout(request: Request) -> Any:
         request.session.clear()
-        return RedirectResponse("/login", status_code=303)
+        return _redirect(request, "/login")
 
     @app.get("/", response_class=HTMLResponse, dependencies=[Depends(_require_auth)])
     async def index(request: Request) -> Any:
         selected_plan_id, selected_plan_name = store.selected_plan()
+        accounts: list[YnabAccount] = []
+        account_error = None
+        if selected_plan_id and settings.ynab_configured:
+            try:
+                accounts = _active_accounts(gateway_factory(settings).list_accounts(selected_plan_id))
+            except YnabError as exc:
+                account_error = str(exc)
         return _render(
             request,
             "index.html",
@@ -93,6 +101,8 @@ def create_app(
                 "selected_plan_name": selected_plan_name,
                 "mappings": store.list_mappings(),
                 "observed_accounts": store.list_observed_accounts(),
+                "accounts": accounts,
+                "account_error": account_error,
                 "ynab_configured": settings.ynab_configured,
             },
         )
@@ -107,7 +117,7 @@ def create_app(
             try:
                 if action == "plan":
                     _save_plan(store, gateway_factory(settings), str(form.get("plan_id") or ""))
-                    return RedirectResponse("/setup", status_code=303)
+                    return _redirect(request, "/setup")
                 if action == "mapping":
                     _save_mapping(
                         store,
@@ -115,32 +125,29 @@ def create_app(
                         iban=str(form.get("iban") or ""),
                         account_id=str(form.get("ynab_account_id") or ""),
                     )
-                    return RedirectResponse("/setup", status_code=303)
+                    return _redirect(request, "/setup")
                 if action == "delete_mapping":
                     store.delete_mapping(str(form.get("iban") or ""))
-                    return RedirectResponse("/setup", status_code=303)
+                    return _redirect(request, "/setup")
                 if action == "dismiss_observed_account":
                     store.dismiss_observed_account(str(form.get("iban") or ""))
-                    return RedirectResponse("/setup", status_code=303)
+                    return _redirect(request, "/setup")
                 if action == "self_names":
                     _save_self_names(store, str(form.get("self_names") or ""))
-                    return RedirectResponse("/setup", status_code=303)
+                    return _redirect(request, "/setup")
                 if action == "counterparty_mapping":
                     _save_counterparty_mapping(
                         store,
                         iban=str(form.get("iban") or ""),
                         label=str(form.get("label") or ""),
                     )
-                    return RedirectResponse("/setup", status_code=303)
+                    return _redirect(request, "/setup")
                 if action == "delete_counterparty_mapping":
                     store.delete_counterparty_mapping(str(form.get("iban") or ""))
-                    return RedirectResponse("/setup", status_code=303)
+                    return _redirect(request, "/setup")
                 if action == "dismiss_observed_counterparty":
                     store.dismiss_observed_counterparty_account(str(form.get("iban") or ""))
-                    return RedirectResponse("/setup", status_code=303)
-                if action == "csv_account":
-                    _save_csv_account_iban(store, str(form.get("csv_account_iban") or ""))
-                    return RedirectResponse("/setup", status_code=303)
+                    return _redirect(request, "/setup")
             except YnabError as exc:
                 post_error = str(exc)
             except HTTPException as exc:
@@ -173,7 +180,6 @@ def create_app(
             "selected_plan_id": store.selected_plan()[0],
             "selected_plan_name": store.selected_plan()[1],
             "self_names": ", ".join(self_names),
-            "csv_account_iban": _effective_csv_account_iban(store, settings) or "",
             "ynab_configured": settings.ynab_configured,
             "error": post_error,
         }
@@ -188,17 +194,37 @@ def create_app(
         return _render(request, "setup.html", context)
 
     @app.post("/uploads", dependencies=[Depends(_require_auth)])
-    async def upload(request: Request, file: UploadFile = File(...)) -> Any:
+    async def upload(request: Request, file: UploadFile = File(...), csv_ynab_account_id: str = Form("")) -> Any:
         filename = file.filename or "upload"
         content = await file.read(settings.max_upload_bytes + 1)
         if len(content) > settings.max_upload_bytes:
             raise HTTPException(status_code=413, detail="Upload is too large.")
+        csv_mapping, csv_error = _csv_mapping_for_upload(
+            filename=filename,
+            account_id=csv_ynab_account_id,
+            store=store,
+            settings=settings,
+            gateway_factory=gateway_factory,
+        )
+        if csv_error:
+            payload = {
+                "filename": filename,
+                "errors": [csv_error],
+                "missing_ibans": [],
+                "statements": [],
+                "rows": [],
+                "transfers": [],
+                "parse_result": None,
+                "account_overrides": {},
+            }
+            job_id = store.create_job(filename=filename, status="blocked", plan_id=store.selected_plan()[0], payload=payload)
+            return _redirect(request, f"/imports/{job_id}")
         try:
             parsed = parse_upload(
                 filename,
                 content,
                 target_currency=settings.target_currency,
-                csv_account_iban=_effective_csv_account_iban(store, settings),
+                csv_account_key=csv_mapping.iban if csv_mapping else None,
             )
         except CamtError as exc:
             payload = {
@@ -209,11 +235,14 @@ def create_app(
                 "rows": [],
                 "transfers": [],
                 "parse_result": None,
+                "account_overrides": {},
             }
             job_id = store.create_job(filename=filename, status="blocked", plan_id=store.selected_plan()[0], payload=payload)
-            return RedirectResponse(f"/imports/{job_id}", status_code=303)
+            return _redirect(request, f"/imports/{job_id}")
 
         for statement in parsed.statements:
+            if _is_csv_account_key(statement.iban):
+                continue
             store.observe_account(
                 iban=statement.iban,
                 currency=statement.currency,
@@ -233,9 +262,10 @@ def create_app(
             plan_id=plan_id,
             plan_name=plan_name,
             filename=filename,
+            account_overrides={csv_mapping.iban: csv_mapping} if csv_mapping else None,
         )
         job_id = store.create_job(filename=filename, status=status, plan_id=plan_id, payload=payload)
-        return RedirectResponse(f"/imports/{job_id}", status_code=303)
+        return _redirect(request, f"/imports/{job_id}")
 
     @app.get("/imports/{job_id}", response_class=HTMLResponse, dependencies=[Depends(_require_auth)])
     async def import_preview(request: Request, job_id: str) -> Any:
@@ -254,16 +284,16 @@ def create_app(
             try:
                 if action == "create_rule":
                     _create_rule_from_form(store, form)
-                    return RedirectResponse("/rules", status_code=303)
+                    return _redirect(request, "/rules")
                 if action == "update_rule":
                     _update_rule_from_form(store, form)
-                    return RedirectResponse("/rules", status_code=303)
+                    return _redirect(request, "/rules")
                 if action == "delete_rule":
                     store.delete_rule(str(form.get("rule_id") or ""))
-                    return RedirectResponse("/rules", status_code=303)
+                    return _redirect(request, "/rules")
                 if action == "move_rule":
                     store.move_rule(str(form.get("rule_id") or ""), str(form.get("direction") or ""))
-                    return RedirectResponse("/rules", status_code=303)
+                    return _redirect(request, "/rules")
                 if action == "test_rule":
                     context = _rules_context(
                         store=store,
@@ -295,7 +325,7 @@ def create_app(
             gateway_factory=gateway_factory,
         )
         store.update_job(job_id, status=status, result=result)
-        return RedirectResponse(f"/imports/{job_id}", status_code=303)
+        return _redirect(request, f"/imports/{job_id}")
 
     return app
 
@@ -345,7 +375,7 @@ def _require_auth(request: Request) -> None:
 
 
 def _render(request: Request, template: str, context: dict[str, Any], *, status_code: int = 200) -> HTMLResponse:
-    context = {"request": request, **context}
+    context = {"request": request, "url_path_for": lambda name, **params: _url_path_for(request, name, **params), **context}
     return templates.TemplateResponse(request, template, context, status_code=status_code)
 
 
@@ -353,6 +383,25 @@ def _safe_next(value: str) -> str:
     if not value.startswith("/") or value.startswith("//"):
         return "/"
     return value
+
+
+def _redirect(request: Request, path: str, *, status_code: int = 303) -> RedirectResponse:
+    return RedirectResponse(_external_path(request.app.state.settings, path), status_code=status_code)
+
+
+def _url_path_for(request: Request, name: str, **path_params: Any) -> str:
+    return _external_path(request.app.state.settings, str(request.app.url_path_for(name, **path_params)))
+
+
+def _external_path(settings: Settings, path: str) -> str:
+    if not path.startswith("/") or path.startswith("//"):
+        path = "/"
+    root_path = settings.root_path.rstrip("/")
+    if not root_path:
+        return path
+    if path == root_path or path.startswith(f"{root_path}/") or path.startswith(f"{root_path}?"):
+        return path
+    return f"{root_path}{path}"
 
 
 def _active_accounts(accounts: list[YnabAccount]) -> list[YnabAccount]:
@@ -412,11 +461,39 @@ def _save_counterparty_mapping(store: Store, *, iban: str, label: str) -> None:
     store.upsert_counterparty_mapping(iban=iban, label=label[:120])
 
 
-def _save_csv_account_iban(store: Store, value: str) -> None:
-    normalized = _normalize_iban(value)
-    if not normalized:
-        raise HTTPException(status_code=400, detail="CSV account IBAN or account key is required.")
-    store.set_config("csv_account_iban", normalized)
+def _csv_mapping_for_upload(
+    *,
+    filename: str,
+    account_id: str,
+    store: Store,
+    settings: Settings,
+    gateway_factory: GatewayFactory,
+) -> tuple[AccountMapping | None, str | None]:
+    if Path(filename).suffix.lower() != ".csv":
+        return None, None
+    if not account_id:
+        return None, "Select a YNAB account for this CSV upload."
+    plan_id, _ = store.selected_plan()
+    if not plan_id:
+        return None, "Select a YNAB plan before uploading CSV files."
+    if not settings.ynab_configured:
+        return None, "YNAB_ACCESS_TOKEN is not configured."
+    try:
+        account = next((item for item in _active_accounts(gateway_factory(settings).list_accounts(plan_id)) if str(item.id) == account_id), None)
+    except YnabError as exc:
+        return None, str(exc)
+    if account is None:
+        return None, "Selected CSV YNAB account was not found."
+    return (
+        AccountMapping(
+            iban=_csv_upload_account_key(str(account.id)),
+            ynab_account_id=str(account.id),
+            ynab_account_name=account.name,
+            transfer_payee_id=account.transfer_payee_id,
+            updated_at="",
+        ),
+        None,
+    )
 
 
 def _rules_context(
@@ -550,6 +627,41 @@ def _normalize_iban(value: str) -> str:
     return "".join(value.upper().split())
 
 
+def _csv_upload_account_key(account_id: str) -> str:
+    return _normalize_iban(f"CSV:{account_id}")
+
+
+def _is_csv_account_key(value: str) -> bool:
+    return _normalize_iban(value).startswith("CSV:")
+
+
+def _account_mapping_to_dict(mapping: AccountMapping) -> dict[str, Any]:
+    return {
+        "iban": mapping.iban,
+        "ynab_account_id": mapping.ynab_account_id,
+        "ynab_account_name": mapping.ynab_account_name,
+        "transfer_payee_id": mapping.transfer_payee_id,
+        "updated_at": mapping.updated_at,
+    }
+
+
+def _account_mapping_from_dict(data: dict[str, Any]) -> AccountMapping:
+    return AccountMapping(
+        iban=str(data["iban"]),
+        ynab_account_id=str(data["ynab_account_id"]),
+        ynab_account_name=str(data["ynab_account_name"]),
+        transfer_payee_id=data.get("transfer_payee_id"),
+        updated_at=str(data.get("updated_at") or ""),
+    )
+
+
+def _mappings_with_overrides(store: Store, ibans: set[str], account_overrides: dict[str, AccountMapping] | None) -> dict[str, AccountMapping]:
+    mappings = store.mappings_for(ibans)
+    if account_overrides:
+        mappings.update({iban: mapping for iban, mapping in account_overrides.items() if iban in ibans})
+    return mappings
+
+
 def _observe_counterparty_accounts(store: Store, parsed: ParseResult) -> None:
     for tx in parsed.transactions:
         if tx.counterparty_iban:
@@ -562,10 +674,6 @@ def _observe_counterparty_accounts(store: Store, parsed: ParseResult) -> None:
 
 def _effective_self_names(store: Store, settings: Settings) -> list[str]:
     return store.self_names() or list(settings.self_names)
-
-
-def _effective_csv_account_iban(store: Store, settings: Settings) -> str | None:
-    return store.get_config("csv_account_iban") or settings.csv_account_iban
 
 
 def _apply_counterparty_account_labels(parsed: ParseResult, *, store: Store, settings: Settings) -> None:
@@ -622,6 +730,7 @@ def _build_preview_payload(
     plan_id: str | None,
     plan_name: str | None,
     filename: str,
+    account_overrides: dict[str, AccountMapping] | None = None,
 ) -> tuple[dict[str, Any], str]:
     errors: list[str] = []
     if not plan_id:
@@ -630,7 +739,7 @@ def _build_preview_payload(
         errors.append("YNAB_ACCESS_TOKEN is not configured.")
 
     transaction_ibans = {tx.iban for tx in parsed.transactions}
-    mappings = store.mappings_for(transaction_ibans)
+    mappings = _mappings_with_overrides(store, transaction_ibans, account_overrides)
     missing_ibans = sorted(transaction_ibans - set(mappings))
     if missing_ibans:
         errors.append("Every IBAN in the upload must be mapped before import.")
@@ -701,12 +810,18 @@ def _build_preview_payload(
             }
         )
 
-    statements = [statement.to_dict() for statement in parsed.statements]
+    statements = []
+    for statement in parsed.statements:
+        statement_mapping = mappings.get(statement.iban)
+        statement_data = statement.to_dict()
+        statement_data["ynab_account_name"] = statement_mapping.ynab_account_name if statement_mapping else None
+        statements.append(statement_data)
     payload = {
         "filename": filename,
         "selected_plan_id": plan_id,
         "selected_plan_name": plan_name,
         "parse_result": parsed.to_dict(),
+        "account_overrides": {iban: _account_mapping_to_dict(mapping) for iban, mapping in (account_overrides or {}).items()},
         "statements": statements,
         "rows": rows,
         "transfers": transfers,
@@ -775,7 +890,11 @@ def _import_job(
         return {"errors": ["No YNAB plan is selected."], "created_count": 0}, "failed"
 
     transaction_ibans = {tx.iban for tx in parsed.transactions}
-    mappings = store.mappings_for(transaction_ibans)
+    account_overrides = {
+        iban: _account_mapping_from_dict(mapping)
+        for iban, mapping in (payload.get("account_overrides") or {}).items()
+    }
+    mappings = _mappings_with_overrides(store, transaction_ibans, account_overrides)
     missing_ibans = sorted(transaction_ibans - set(mappings))
     if missing_ibans:
         return {"errors": [f"Missing IBAN mappings: {', '.join(missing_ibans)}"], "created_count": 0}, "failed"

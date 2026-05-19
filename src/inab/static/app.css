@@ -132,6 +132,16 @@ label span {
 .brand {
   color: var(--text);
   font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
 }
 
 .nav {
@@ -310,6 +320,25 @@ label span {
 
 .upload-panel {
   margin-bottom: 24px;
+}
+
+.upload-panel form {
+  display: grid;
+  gap: 14px;
+}
+
+.csv-account-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.csv-account-panel[hidden] {
+  display: none;
+}
+
+.csv-account-panel p {
+  margin: 0;
 }
 
 .drop-zone {

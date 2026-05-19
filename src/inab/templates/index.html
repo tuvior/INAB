@@ -6,7 +6,7 @@
     <h1>Import bank statements</h1>
     <p class="muted">CAMT.053 XML and supported CSV exports are parsed locally, previewed, then sent to YNAB after confirmation.</p>
   </div>
-  <a class="button secondary" href="/setup">Setup</a>
+  <a class="button secondary" href="{{ url_path_for('setup') }}">Setup</a>
 </section>
 
 <section class="status-grid">
@@ -36,12 +36,27 @@
 </section>
 
 <section class="panel upload-panel">
-  <form id="upload-form" method="post" action="/uploads" enctype="multipart/form-data">
+  <form id="upload-form" method="post" action="{{ url_path_for('upload') }}" enctype="multipart/form-data">
     <label id="drop-zone" class="drop-zone">
       <input id="file-input" name="file" type="file" accept=".xml,.csv,text/xml,application/xml,text/csv" required>
       <span class="drop-title">Drop a CAMT.053 XML or CSV file</span>
       <span id="file-name" class="muted">or choose one from disk</span>
     </label>
+    <div id="csv-account-panel" class="csv-account-panel" hidden>
+      {% if account_error %}
+        <div class="alert alert-error">{{ account_error }}</div>
+      {% endif %}
+      <label>
+        <span>CSV target account</span>
+        <select id="csv-account-select" name="csv_ynab_account_id">
+          <option value="">Select the YNAB account for this CSV</option>
+          {% for account in accounts %}
+            <option value="{{ account.id }}">{{ account.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <p class="muted">CSV files do not include an account identifier, so choose the destination account for each upload.</p>
+    </div>
     <div class="form-actions">
       <button type="submit">Preview import</button>
     </div>

@@ -6,7 +6,7 @@
     <h1>Rules</h1>
     <p class="muted">Rewrite payees and assign YNAB categories before preview and import.</p>
   </div>
-  <a class="button secondary" href="/setup">Setup</a>
+  <a class="button secondary" href="{{ url_path_for('setup') }}">Setup</a>
 </section>
 
 {% if error %}
@@ -39,7 +39,7 @@
 
 <section class="panel form-stack">
   <h2>Add rule</h2>
-  <form class="rule-form" method="post" action="/rules">
+  <form class="rule-form" method="post" action="{{ url_path_for('rules') }}">
     <input type="hidden" name="action" value="create_rule">
     <label>
       <span>Name</span>
@@ -82,7 +82,7 @@
 
 <section class="panel form-stack">
   <h2>Test transaction</h2>
-  <form class="inline-form" method="post" action="/rules">
+  <form class="inline-form" method="post" action="{{ url_path_for('rules') }}">
     <input type="hidden" name="action" value="test_rule">
     <label class="grow">
       <span>Payee</span>
@@ -166,7 +166,7 @@
       {% for view in rule_views %}
         {% set rule = view.rule %}
         <article class="panel rule-card">
-          <form class="rule-form" method="post" action="/rules">
+          <form class="rule-form" method="post" action="{{ url_path_for('rules') }}">
             <input type="hidden" name="action" value="update_rule">
             <input type="hidden" name="rule_id" value="{{ rule.id }}">
             <label>
@@ -216,19 +216,19 @@
             </div>
           </form>
           <div class="rule-row-actions">
-            <form method="post" action="/rules">
+            <form method="post" action="{{ url_path_for('rules') }}">
               <input type="hidden" name="action" value="move_rule">
               <input type="hidden" name="rule_id" value="{{ rule.id }}">
               <input type="hidden" name="direction" value="up">
               <button class="secondary" type="submit">Move up</button>
             </form>
-            <form method="post" action="/rules">
+            <form method="post" action="{{ url_path_for('rules') }}">
               <input type="hidden" name="action" value="move_rule">
               <input type="hidden" name="rule_id" value="{{ rule.id }}">
               <input type="hidden" name="direction" value="down">
               <button class="secondary" type="submit">Move down</button>
             </form>
-            <form method="post" action="/rules">
+            <form method="post" action="{{ url_path_for('rules') }}">
               <input type="hidden" name="action" value="delete_rule">
               <input type="hidden" name="rule_id" value="{{ rule.id }}">
               <button class="secondary danger" type="submit">Delete</button>

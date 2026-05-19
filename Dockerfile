@@ -1,19 +1,24 @@
-FROM python:3.14-slim
+FROM python:3.14-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    INAB_DATA_DIR=/data
+    INAB_DATA_DIR=/data \
+    PYTHONPATH=/app/src
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir uv
+RUN apk add --no-cache ca-certificates \
+    && pip install --no-cache-dir uv
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock ./
+
+RUN uv export --frozen --no-dev --no-emit-project --no-hashes --output-file /tmp/requirements.txt > /dev/null \
+    && uv pip install --system --no-cache --requirement /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
+
 COPY src ./src
-
-RUN uv pip install --system .
 
 EXPOSE 8000
 VOLUME ["/data"]
 
-CMD ["uvicorn", "inab.web:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "inab.web:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

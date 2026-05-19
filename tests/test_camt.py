@@ -54,12 +54,12 @@ def test_rejects_unsupported_file_extension() -> None:
         parse_upload("export.mt940", b"not supported")
 
 
-def test_csv_upload_requires_configured_account() -> None:
-    with pytest.raises(CamtParseError, match="CSV uploads require"):
+def test_csv_upload_requires_selected_account() -> None:
+    with pytest.raises(CamtParseError, match="CSV uploads require a selected YNAB account"):
         parse_upload("export.csv", b'"Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"\n')
 
 
-def test_supported_csv_export_parses_with_configured_account() -> None:
+def test_supported_csv_export_parses_with_selected_account_key() -> None:
     content = b'''"Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
 "2026-04-30";"600.00";"";"";"";"Alex Example";"";"income";"";"no";"no"
 "2026-04-28";"-16.57";"-17.90";"EUR";"1.08027";"SAMPLE BISTRO";;"food";"";"no";"no"

@@ -4,8 +4,9 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 
+from inab.config import Settings
 from inab.store import Store
-from inab.web import _save_plan, format_money
+from inab.web import _save_plan, create_app, format_money
 from inab.ynab_api import YnabPlan
 
 from conftest import FakeGateway, camt_document, entry_xml, login, statement_xml
@@ -27,6 +28,62 @@ def test_rules_page_requires_auth(app_client: tuple[TestClient, Store, FakeGatew
 
     assert response.status_code == 303
     assert response.headers["location"].startswith("/login")
+
+
+def test_root_path_uses_relative_prefixed_template_urls(tmp_path, fake_gateway: FakeGateway) -> None:
+    settings = Settings(
+        data_dir=tmp_path,
+        ynab_access_token="fake-token",
+        username="inab",
+        password="secret",
+        session_secret="test-session",
+        root_path="/inab",
+    )
+    app = create_app(settings=settings, store=Store(settings.database_path), gateway_factory=lambda _settings: fake_gateway)
+    client = TestClient(app)
+
+    response = client.get("/login")
+
+    assert response.status_code == 200
+    assert 'href="/inab/static/app.css"' in response.text
+    assert 'src="/inab/static/app.js"' in response.text
+    assert 'href="/inab/"' in response.text
+    assert 'href="/inab/rules"' in response.text
+    assert 'href="/inab/setup"' in response.text
+    assert 'action="/inab/login"' in response.text
+    assert "http://testserver" not in response.text
+
+
+def test_root_path_redirects_to_prefixed_paths(tmp_path, fake_gateway: FakeGateway) -> None:
+    settings = Settings(
+        data_dir=tmp_path,
+        ynab_access_token="fake-token",
+        username="inab",
+        password="secret",
+        session_secret="test-session",
+        root_path="/inab",
+    )
+    app = create_app(settings=settings, store=Store(settings.database_path), gateway_factory=lambda _settings: fake_gateway)
+    client = TestClient(app)
+
+    gated = client.get("/", follow_redirects=False)
+    login_response = client.post(
+        "/login",
+        data={"username": "inab", "password": "secret", "next": "/setup"},
+        follow_redirects=False,
+    )
+    already_prefixed = client.post(
+        "/login",
+        data={"username": "inab", "password": "secret", "next": "/inab/setup"},
+        follow_redirects=False,
+    )
+
+    assert gated.status_code == 303
+    assert gated.headers["location"] == "/inab/login?next=/"
+    assert login_response.status_code == 303
+    assert login_response.headers["location"] == "/inab/setup"
+    assert already_prefixed.status_code == 303
+    assert already_prefixed.headers["location"] == "/inab/setup"
 
 
 def test_rules_page_loads_visible_categories_and_saves_rule(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
@@ -289,25 +346,49 @@ def test_setup_hides_mapped_and_dismissed_account_suggestions(app_client: tuple[
     assert "CH222" not in response.text
 
 
-def test_csv_upload_uses_configured_csv_account_mapping(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_csv_upload_requires_upload_account_selection(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.set_config("csv_account_iban", "CH999")
-    store.upsert_mapping(iban="CH999", ynab_account_id="savings-id", ynab_account_name="Other Bank", transfer_payee_id="tp-savings")
     content = b'''"Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
 "2026-04-30";"600.00";"";"";"";"Alex Example";"";"income";"";"no";"no"
 '''
 
-    upload = client.post("/uploads", files={"file": ("other-bank.csv", content, "text/csv")}, follow_redirects=False)
+    upload = client.post("/uploads", files={"file": ("other-bank.csv", content, "text/csv")}, follow_redirects=True)
+
+    assert upload.status_code == 200
+    assert "Select a YNAB account for this CSV upload" in upload.text
+
+
+def test_csv_upload_uses_selected_upload_account(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+    client, store, gateway = app_client
+    login(client)
+    store.save_selected_plan("plan-1", "Household")
+    content = b'''"Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
+"2026-04-30";"600.00";"";"";"";"Alex Example";"";"income";"";"no";"no"
+'''
+
+    upload = client.post(
+        "/uploads",
+        data={"csv_ynab_account_id": "savings-id"},
+        files={"file": ("other-bank.csv", content, "text/csv")},
+        follow_redirects=False,
+    )
 
     assert upload.status_code == 303
     job_id = upload.headers["location"].rsplit("/", 1)[1]
     job = store.get_job(job_id)
     assert job is not None
     assert job["status"] == "preview"
-    assert job["payload"]["rows"][0]["ynab_account_name"] == "Other Bank"
+    assert job["payload"]["statements"][0]["ynab_account_name"] == "Savings"
+    assert job["payload"]["rows"][0]["ynab_account_name"] == "Savings"
     assert job["payload"]["rows"][0]["transaction"]["payee"] == "Alex Example"
+    assert job["payload"]["rows"][0]["transaction"]["iban"] == "CSV:SAVINGS-ID"
+
+    response = client.post(f"/imports/{job_id}", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert gateway.created[0]["account_id"] == "savings-id"
 
 
 def test_setup_hides_labeled_and_dismissed_counterparty_suggestions(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
@@ -340,12 +421,15 @@ def test_rule_edited_csv_row_keeps_original_import_id(app_client: tuple[TestClie
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.set_config("csv_account_iban", "CH999")
-    store.upsert_mapping(iban="CH999", ynab_account_id="savings-id", ynab_account_name="Other Bank", transfer_payee_id="tp-savings")
     content = b'''"Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
 "2026-04-30";"600.00";"";"";"";"Alex Example";"";"income";"";"no";"no"
 '''
-    first = client.post("/uploads", files={"file": ("other-bank.csv", content, "text/csv")}, follow_redirects=False)
+    first = client.post(
+        "/uploads",
+        data={"csv_ynab_account_id": "savings-id"},
+        files={"file": ("other-bank.csv", content, "text/csv")},
+        follow_redirects=False,
+    )
     first_job = store.get_job(first.headers["location"].rsplit("/", 1)[1])
     assert first_job is not None
     original_import_id = first_job["payload"]["rows"][0]["transaction"]["import_id"]
@@ -359,7 +443,12 @@ def test_rule_edited_csv_row_keeps_original_import_id(app_client: tuple[TestClie
         category_name="Everyday: Food",
     )
 
-    second = client.post("/uploads", files={"file": ("other-bank.csv", content, "text/csv")}, follow_redirects=False)
+    second = client.post(
+        "/uploads",
+        data={"csv_ynab_account_id": "savings-id"},
+        files={"file": ("other-bank.csv", content, "text/csv")},
+        follow_redirects=False,
+    )
     second_job = store.get_job(second.headers["location"].rsplit("/", 1)[1])
 
     assert second_job is not None

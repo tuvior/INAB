@@ -23,7 +23,7 @@
   <div class="setup-grid">
     <section class="panel form-stack compact-panel">
       <h3>Budget</h3>
-      <form class="inline-form" method="post" action="/setup">
+      <form class="inline-form" method="post" action="{{ url_path_for('setup') }}">
         <input type="hidden" name="action" value="plan">
         <label class="grow">
           <span>Plan</span>
@@ -39,19 +39,6 @@
       {% if selected_plan_name %}
         <p class="muted">Current plan: {{ selected_plan_name }}</p>
       {% endif %}
-    </section>
-
-    <section class="panel form-stack compact-panel">
-      <h3>CSV account</h3>
-      <p class="muted">CSV exports do not include an account IBAN. Use the IBAN or account key that should represent those uploads.</p>
-      <form class="inline-form" method="post" action="/setup">
-        <input type="hidden" name="action" value="csv_account">
-        <label class="grow">
-          <span>CSV account IBAN or key</span>
-          <input name="csv_account_iban" value="{{ csv_account_iban }}" placeholder="CH...">
-        </label>
-        <button type="submit">Save</button>
-      </form>
     </section>
   </div>
 </section>
@@ -77,7 +64,7 @@
       <div class="mapping-list">
         {% for observed in observed_account_suggestions %}
           <div class="mapping-row mapping-row-with-dismiss">
-            <form class="mapping-row-form" method="post" action="/setup">
+            <form class="mapping-row-form" method="post" action="{{ url_path_for('setup') }}">
               <input type="hidden" name="action" value="mapping">
               <input type="hidden" name="iban" value="{{ observed.iban }}">
               <div>
@@ -92,7 +79,7 @@
               </select>
               <button type="submit">Save</button>
             </form>
-            <form method="post" action="/setup">
+            <form method="post" action="{{ url_path_for('setup') }}">
               <input type="hidden" name="action" value="dismiss_observed_account">
               <input type="hidden" name="iban" value="{{ observed.iban }}">
               <button class="secondary" type="submit">Dismiss</button>
@@ -108,7 +95,7 @@
   <section class="panel form-stack">
     <h3>Manual mapping</h3>
     {% if selected_plan_id and accounts %}
-      <form class="inline-form" method="post" action="/setup">
+      <form class="inline-form" method="post" action="{{ url_path_for('setup') }}">
         <input type="hidden" name="action" value="mapping">
         <label class="grow">
           <span>IBAN or account key</span>
@@ -148,7 +135,7 @@
                 <td>{{ mapping.iban }}</td>
                 <td>{{ mapping.ynab_account_name }}</td>
                 <td class="right">
-                  <form method="post" action="/setup">
+                  <form method="post" action="{{ url_path_for('setup') }}">
                     <input type="hidden" name="action" value="delete_mapping">
                     <input type="hidden" name="iban" value="{{ mapping.iban }}">
                     <button class="secondary" type="submit">Remove</button>
@@ -172,7 +159,7 @@
     <section class="panel form-stack compact-panel">
       <h3>Own-name aliases</h3>
       <p class="muted">Rows paid to one of these names can be relabeled when their counterparty IBAN is mapped.</p>
-      <form class="form-stack" method="post" action="/setup">
+      <form class="form-stack" method="post" action="{{ url_path_for('setup') }}">
         <input type="hidden" name="action" value="self_names">
         <label>
           <span>Names</span>
@@ -187,7 +174,7 @@
     <section class="panel form-stack compact-panel">
       <h3>Counterparty label</h3>
       <p class="muted">Label accounts outside uploaded YNAB accounts, such as pension, mortgage, or another bank.</p>
-      <form class="inline-form" method="post" action="/setup">
+      <form class="inline-form" method="post" action="{{ url_path_for('setup') }}">
         <input type="hidden" name="action" value="counterparty_mapping">
         <label class="grow">
           <span>Counterparty IBAN</span>
@@ -208,7 +195,7 @@
       <div class="mapping-list">
         {% for observed in observed_counterparty_suggestions %}
           <div class="mapping-row mapping-row-with-dismiss">
-            <form class="mapping-row-form" method="post" action="/setup">
+            <form class="mapping-row-form" method="post" action="{{ url_path_for('setup') }}">
               <input type="hidden" name="action" value="counterparty_mapping">
               <input type="hidden" name="iban" value="{{ observed.iban }}">
               <div>
@@ -218,7 +205,7 @@
               <input name="label" placeholder="e.g. External savings" required>
               <button type="submit">Save</button>
             </form>
-            <form method="post" action="/setup">
+            <form method="post" action="{{ url_path_for('setup') }}">
               <input type="hidden" name="action" value="dismiss_observed_counterparty">
               <input type="hidden" name="iban" value="{{ observed.iban }}">
               <button class="secondary" type="submit">Dismiss</button>
@@ -249,7 +236,7 @@
                 <td>{{ mapping.iban }}</td>
                 <td>{{ mapping.label }}</td>
                 <td class="right">
-                  <form method="post" action="/setup">
+                  <form method="post" action="{{ url_path_for('setup') }}">
                     <input type="hidden" name="action" value="delete_counterparty_mapping">
                     <input type="hidden" name="iban" value="{{ mapping.iban }}">
                     <button class="secondary" type="submit">Remove</button>

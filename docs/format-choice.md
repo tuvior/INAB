@@ -61,7 +61,7 @@ The newer CSV export has these columns:
 - `Wise`
 - `Spaces`
 
-This CSV is supported because it is the only available export for that bank. The account identifier is not present in the file, so INAB requires a configured CSV account IBAN or account key before upload. The `Amount` column is treated as the signed account-currency amount. The original amount, currency, and exchange rate are retained in the memo for FX card transactions.
+This CSV is supported because it is the only available export for that bank. The account identifier is not present in the file, so INAB asks for the target YNAB account on each CSV upload. The selected account is used as a temporary account key for preview, duplicate detection, and deterministic import IDs. The `Amount` column is treated as the signed account-currency amount. The original amount, currency, and exchange rate are retained in the memo for FX card transactions.
 
 The April CSV sample has 24 transactions, covers 2026-04-03 through 2026-04-30, and includes the expected CHF 600.00 inflow from the Raiffeisen outflow visible in the CAMT sample.
 
@@ -80,4 +80,4 @@ Observed traits:
 
 Prefer CAMT.053 XML when the bank offers it.
 
-Use the supported CSV format for the bank that only exposes CSV. It uses deterministic hash-based import IDs derived from account key, date, amount, payee, memo, and occurrence count. MT940 should only be added if a concrete need appears, because CAMT carries richer structured data for the same bank export workflow.
+Use the supported CSV format for the bank that only exposes CSV. It uses deterministic hash-based import IDs derived from the selected YNAB account, date, amount, payee, memo, and occurrence count. MT940 should only be added if a concrete need appears, because CAMT carries richer structured data for the same bank export workflow.

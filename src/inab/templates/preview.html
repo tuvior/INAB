@@ -6,7 +6,7 @@
     <h1>{{ job.filename }}</h1>
     <p class="muted">Status: {{ job.status }}</p>
   </div>
-  <a class="button secondary" href="/">New upload</a>
+  <a class="button secondary" href="{{ url_path_for('index') }}">New upload</a>
 </section>
 
 {% for error in job.payload.errors %}
@@ -34,7 +34,7 @@
         <li>{{ iban }}</li>
       {% endfor %}
     </ul>
-    <a class="button secondary" href="/setup">Open setup</a>
+    <a class="button secondary" href="{{ url_path_for('setup') }}">Open setup</a>
   </section>
 {% endif %}
 
@@ -63,7 +63,7 @@
     <table>
       <thead>
         <tr>
-          <th>IBAN</th>
+          <th>Account</th>
           <th>Currency</th>
           <th>Entries</th>
           <th>Movement</th>
@@ -73,7 +73,7 @@
       <tbody>
         {% for statement in job.payload.statements %}
           <tr>
-            <td>{{ statement.iban }}</td>
+            <td>{{ statement.ynab_account_name or statement.iban }}</td>
             <td>{{ statement.currency }}</td>
             <td>{{ statement.transactions|length }}</td>
             <td>{{ statement.movement_total|money }}</td>
@@ -87,7 +87,7 @@
 {% endif %}
 
 {% if job.status in ["preview", "failed"] and not job.payload.errors and not job.payload.missing_ibans %}
-<form method="post" action="/imports/{{ job.id }}">
+<form method="post" action="{{ url_path_for('run_import', job_id=job.id) }}">
   {% if job.payload.transfers %}
     <section>
       <h2>Proposed transfers</h2>

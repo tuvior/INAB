@@ -55,15 +55,15 @@ def parse_upload(
     content: bytes,
     *,
     target_currency: str = "CHF",
-    csv_account_iban: str | None = None,
+    csv_account_key: str | None = None,
 ) -> ParseResult:
     suffix = Path(filename).suffix.lower()
     if suffix == ".xml":
         return parse_camt(content, target_currency=target_currency)
     if suffix == ".csv":
-        if not csv_account_iban:
-            raise CamtParseError("CSV uploads require a configured CSV account IBAN or account key.")
-        return parse_csv_export(filename, content, account_iban=csv_account_iban, target_currency=target_currency)
+        if not csv_account_key:
+            raise CamtParseError("CSV uploads require a selected YNAB account.")
+        return parse_csv_export(filename, content, account_iban=csv_account_key, target_currency=target_currency)
     if suffix == ".mt940":
         raise UnsupportedFormatError("MT940 files are not supported. Use CAMT.053 XML or the supported CSV export.")
     raise UnsupportedFormatError("Only CAMT.053 XML and the supported CSV export are accepted.")
@@ -72,7 +72,7 @@ def parse_upload(
 def parse_csv_export(filename: str, content: bytes, *, account_iban: str, target_currency: str = "CHF") -> ParseResult:
     account_iban = _normalize_account_key(account_iban)
     if not account_iban:
-        raise CamtParseError("CSV account IBAN or account key is required.")
+        raise CamtParseError("CSV target account key is required.")
     text = _decode_csv(content)
     try:
         reader = csv.DictReader(io.StringIO(text), delimiter=";", quotechar='"')

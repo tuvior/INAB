@@ -6,7 +6,7 @@
   {% if error %}
     <div class="alert alert-error">{{ error }}</div>
   {% endif %}
-  <form class="panel form-stack" method="post" action="/login">
+  <form class="panel form-stack" method="post" action="{{ url_path_for('login') }}">
     <input type="hidden" name="next" value="{{ next }}">
     <label>
       <span>Username</span>

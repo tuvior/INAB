@@ -33,10 +33,10 @@ export INAB_SESSION_SECRET="stable-cookie-signing-secret"
 export INAB_MAX_UPLOAD_BYTES="10485760"
 export INAB_TARGET_CURRENCY="CHF"
 export INAB_SELF_NAMES="Alex Example,Example Alex"
-export INAB_CSV_ACCOUNT_IBAN="CH..."
+export INAB_ROOT_PATH="/inab"
 ```
 
-For self-hosting, put the app behind HTTPS and keep `INAB_DATA_DIR` on persistent storage.
+For self-hosting, put the app behind HTTPS and keep `INAB_DATA_DIR` on persistent storage. Set `INAB_ROOT_PATH` only when the app is published under a URL prefix such as `https://example.test/inab`; leave it empty when serving at the domain root.
 
 ## Run Locally
 
@@ -45,7 +45,7 @@ uv sync --extra dev
 uv run uvicorn inab.web:create_app --factory --reload
 ```
 
-Open `http://127.0.0.1:8000`, log in, select your YNAB plan, then upload a CAMT.053 XML export once so the app can discover IBANs. Map each discovered IBAN to a YNAB account in Setup, then upload again to preview and import. For CSV uploads, set the CSV account IBAN or account key in Setup first because the CSV file itself does not include one.
+Open `http://127.0.0.1:8000`, log in, select your YNAB plan, then upload a CAMT.053 XML export once so the app can discover IBANs. Map each discovered IBAN to a YNAB account in Setup, then upload again to preview and import. For CSV uploads, select the target YNAB account on the upload form because the CSV file itself does not include one.
 
 ## Docker
 
