@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Import - INAB{% endblock %}
+{% block content %}
+<section class="toolbar-section">
+  <div>
+    <h1>Import bank statements</h1>
+    <p class="muted">CAMT.053 XML exports are parsed locally, previewed, then sent to YNAB after confirmation.</p>
+  </div>
+  <a class="button secondary" href="/setup">Setup</a>
+</section>
+
+<section class="status-grid">
+  <div class="panel">
+    <h2>YNAB</h2>
+    {% if ynab_configured %}
+      <p class="status ok">Token configured</p>
+    {% else %}
+      <p class="status bad">Missing YNAB_ACCESS_TOKEN</p>
+    {% endif %}
+    {% if selected_plan_id %}
+      <p>{{ selected_plan_name }}</p>
+    {% else %}
+      <p class="muted">No YNAB plan selected.</p>
+    {% endif %}
+  </div>
+  <div class="panel">
+    <h2>Mappings</h2>
+    <p class="metric">{{ mappings|length }}</p>
+    <p class="muted">IBAN to YNAB account mappings</p>
+  </div>
+  <div class="panel">
+    <h2>Seen accounts</h2>
+    <p class="metric">{{ observed_accounts|length }}</p>
+    <p class="muted">Accounts discovered from uploads</p>
+  </div>
+</section>
+
+<section class="panel upload-panel">
+  <form id="upload-form" method="post" action="/uploads" enctype="multipart/form-data">
+    <label id="drop-zone" class="drop-zone">
+      <input id="file-input" name="file" type="file" accept=".xml,text/xml,application/xml" required>
+      <span class="drop-title">Drop a CAMT.053 XML file</span>
+      <span id="file-name" class="muted">or choose one from disk</span>
+    </label>
+    <div class="form-actions">
+      <button type="submit">Preview import</button>
+    </div>
+  </form>
+</section>
+
+{% if mappings %}
+<section>
+  <h2>Configured mappings</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>IBAN</th>
+          <th>YNAB account</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for mapping in mappings %}
+          <tr>
+            <td>{{ mapping.iban }}</td>
+            <td>{{ mapping.ynab_account_name }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Preview - INAB{% endblock %}
+{% block content %}
+<section class="toolbar-section">
+  <div>
+    <h1>{{ job.filename }}</h1>
+    <p class="muted">Status: {{ job.status }}</p>
+  </div>
+  <a class="button secondary" href="/">New upload</a>
+</section>
+
+{% for error in job.payload.errors %}
+  <div class="alert alert-error">{{ error }}</div>
+{% endfor %}
+
+{% if job.result %}
+  {% if job.result.errors %}
+    {% for error in job.result.errors %}
+      <div class="alert alert-error">{{ error }}</div>
+    {% endfor %}
+  {% else %}
+    <div class="alert alert-ok">
+      Created {{ job.result.created_count }} transactions. Skipped {{ job.result.skipped_duplicates|length }} duplicates and {{ job.result.skipped_transfer_counterparts|length }} transfer counterparts.
+    </div>
+  {% endif %}
+{% endif %}
+
+{% if job.payload.missing_ibans %}
+  <section class="panel">
+    <h2>Missing mappings</h2>
+    <p>Map these IBANs before importing:</p>
+    <ul>
+      {% for iban in job.payload.missing_ibans %}
+        <li>{{ iban }}</li>
+      {% endfor %}
+    </ul>
+    <a class="button secondary" href="/setup">Open setup</a>
+  </section>
+{% endif %}
+
+{% if job.payload.statements %}
+<section class="status-grid">
+  <div class="panel">
+    <h2>Transactions</h2>
+    <p class="metric">{{ job.payload.transaction_count }}</p>
+    <p class="muted">{{ job.payload.ready_count }} ready, {{ job.payload.duplicate_count }} duplicates</p>
+  </div>
+  <div class="panel">
+    <h2>Accounts</h2>
+    <p class="metric">{{ job.payload.statements|length }}</p>
+    <p class="muted">{{ job.payload.selected_plan_name or "No plan selected" }}</p>
+  </div>
+  <div class="panel">
+    <h2>Transfers</h2>
+    <p class="metric">{{ job.payload.transfers|length }}</p>
+    <p class="muted">Unambiguous internal pairs</p>
+  </div>
+</section>
+
+<section>
+  <h2>Statements</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>IBAN</th>
+          <th>Currency</th>
+          <th>Entries</th>
+          <th>Movement</th>
+          <th>Balances</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for statement in job.payload.statements %}
+          <tr>
+            <td>{{ statement.iban }}</td>
+            <td>{{ statement.currency }}</td>
+            <td>{{ statement.transactions|length }}</td>
+            <td>{{ statement.movement_total|money }}</td>
+            <td>{% if statement.balances_reconcile == true %}Reconciled{% elif statement.balances_reconcile == false %}Mismatch{% else %}No balances{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if job.status in ["preview", "failed"] and not job.payload.errors and not job.payload.missing_ibans %}
+<form method="post" action="/imports/{{ job.id }}">
+  {% if job.payload.transfers %}
+    <section>
+      <h2>Proposed transfers</h2>
+      <div class="transfer-list">
+        {% for transfer in job.payload.transfers %}
+          <label class="transfer-row">
+            <input type="checkbox" name="accepted_transfers" value="{{ transfer.id }}" checked>
+            <span>
+              <strong>{{ transfer.amount|money }} {{ transfer.currency }}</strong>
+              {{ transfer.source_account_name }} to {{ transfer.target_account_name }}
+              <span class="muted">{{ transfer.debit_date }} / {{ transfer.credit_date }} · {{ transfer.reason }}</span>
+            </span>
+          </label>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+  <div class="sticky-actions">
+    <button type="submit">Import to YNAB</button>
+  </div>
+</form>
+{% endif %}
+
+{% if job.payload.rows %}
+<section>
+  <h2>Preview rows</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Account</th>
+          <th>Payee</th>
+          <th class="right">Amount</th>
+          <th>Status</th>
+          <th>Import ID</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in job.payload.rows %}
+          <tr>
+            <td>{{ row.transaction.booking_date }}</td>
+            <td>{{ row.ynab_account_name or row.transaction.iban }}</td>
+            <td>
+              {{ row.transaction.payee }}
+              {% if row.transaction.memo %}
+                <span class="muted block">{{ row.transaction.memo }}</span>
+              {% endif %}
+            </td>
+            <td class="right amount {% if row.transaction.amount|string|first == '-' %}negative{% else %}positive{% endif %}">{{ row.transaction.amount|money }}</td>
+            <td><span class="chip chip-{{ row.status }}">{{ row.status }}</span></td>
+            <td class="mono">{{ row.transaction.import_id }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

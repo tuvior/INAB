@@ -1,1 +1,9 @@
 /sample
+/.venv
+/.pytest_cache
+/.ruff_cache
+/data
+*.sqlite3
+*.db
+__pycache__/
+.env

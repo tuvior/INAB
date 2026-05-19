@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Setup - INAB{% endblock %}
+{% block content %}
+<section class="toolbar-section">
+  <div>
+    <h1>Setup</h1>
+    <p class="muted">Select one YNAB plan, then map every bank IBAN to the matching YNAB account.</p>
+  </div>
+</section>
+
+{% if error %}
+  <div class="alert alert-error">{{ error }}</div>
+{% endif %}
+{% if not ynab_configured %}
+  <div class="alert alert-error">YNAB_ACCESS_TOKEN is not configured.</div>
+{% endif %}
+
+<section class="panel form-stack">
+  <h2>YNAB plan</h2>
+  <form class="inline-form" method="post" action="/setup">
+    <input type="hidden" name="action" value="plan">
+    <label class="grow">
+      <span>Plan</span>
+      <select name="plan_id" required>
+        <option value="">Select a plan</option>
+        {% for plan in plans %}
+          <option value="{{ plan.id }}" {% if plan.id == selected_plan_id %}selected{% endif %}>{{ plan.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Save plan</button>
+  </form>
+  {% if selected_plan_name %}
+    <p class="muted">Current plan: {{ selected_plan_name }}</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>IBAN mappings</h2>
+  {% if not selected_plan_id %}
+    <p class="muted">Select a plan before adding mappings.</p>
+  {% elif not accounts %}
+    <p class="muted">No active YNAB accounts are available.</p>
+  {% else %}
+    <div class="mapping-list">
+      {% for observed in observed_accounts %}
+        <form class="mapping-row" method="post" action="/setup">
+          <input type="hidden" name="action" value="mapping">
+          <input type="hidden" name="iban" value="{{ observed.iban }}">
+          <div>
+            <strong>{{ observed.iban }}</strong>
+            <span class="muted">{{ observed.currency }}{% if observed.owner_name %} · {{ observed.owner_name }}{% endif %}</span>
+          </div>
+          <select name="ynab_account_id" required>
+            <option value="">Map to account</option>
+            {% for account in accounts %}
+              <option value="{{ account.id }}">{{ account.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Save</button>
+        </form>
+      {% endfor %}
+    </div>
+
+    <form class="inline-form manual-map" method="post" action="/setup">
+      <input type="hidden" name="action" value="mapping">
+      <label class="grow">
+        <span>IBAN</span>
+        <input name="iban" placeholder="CH..." required>
+      </label>
+      <label class="grow">
+        <span>YNAB account</span>
+        <select name="ynab_account_id" required>
+          <option value="">Select an account</option>
+          {% for account in accounts %}
+            <option value="{{ account.id }}">{{ account.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Add mapping</button>
+    </form>
+  {% endif %}
+</section>
+
+{% if mappings %}
+<section>
+  <h2>Saved mappings</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>IBAN</th>
+          <th>YNAB account</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for mapping in mappings %}
+          <tr>
+            <td>{{ mapping.iban }}</td>
+            <td>{{ mapping.ynab_account_name }}</td>
+            <td class="right">
+              <form method="post" action="/setup">
+                <input type="hidden" name="action" value="delete_mapping">
+                <input type="hidden" name="iban" value="{{ mapping.iban }}">
+                <button class="secondary" type="submit">Remove</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

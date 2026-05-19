@@ -1,0 +1,22 @@
+services:
+  inab:
+    build:
+      context: .
+    # image: inab:latest
+    container_name: inab
+    restart: unless-stopped
+    ports:
+      - "${INAB_PORT:-8000}:8000"
+    environment:
+      YNAB_ACCESS_TOKEN: "${YNAB_ACCESS_TOKEN}"
+      INAB_USERNAME: "${INAB_USERNAME}"
+      INAB_PASSWORD: "${INAB_PASSWORD}"
+      INAB_SESSION_SECRET: "${INAB_SESSION_SECRET}"
+      INAB_DATA_DIR: "/data"
+      INAB_MAX_UPLOAD_BYTES: "${INAB_MAX_UPLOAD_BYTES:-10485760}"
+      INAB_TARGET_CURRENCY: "${INAB_TARGET_CURRENCY:-CHF}"
+    volumes:
+      - inab-data:/data
+
+volumes:
+  inab-data:
