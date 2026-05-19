@@ -838,7 +838,7 @@ def _build_preview_payload(
         transfer_by_import_id[pair.credit_import_id] = (pair.id, "credit")
 
     rows = []
-    for tx in parsed.transactions:
+    for tx in _preview_transactions(parsed.transactions):
         mapping = mappings.get(tx.iban)
         duplicate = bool(mapping and (mapping.ynab_account_id, tx.import_id) in duplicate_keys)
         transfer_marker = transfer_by_import_id.get(tx.import_id)
@@ -904,6 +904,10 @@ def _build_preview_payload(
         "skipped_entries": parsed.skipped_entries,
     }
     return payload, "blocked" if errors else "preview"
+
+
+def _preview_transactions(transactions: list[BankTransaction]) -> list[BankTransaction]:
+    return sorted(transactions, key=lambda tx: tx.booking_date)
 
 
 def _row_status(

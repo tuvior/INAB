@@ -267,6 +267,47 @@ def test_upload_preview_marks_bank_date_card_fallback_import_id_as_duplicate(app
     assert gateway.existing_calls == [("plan-1", "checking-id", date(2026, 1, 15))]
 
 
+def test_upload_preview_sorts_rows_by_effective_transaction_date(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+    client, store, _ = app_client
+    login(client)
+    store.save_selected_plan("plan-1", "Household")
+    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    card_entry = """
+<Ntry>
+  <Amt Ccy="CHF">58.65</Amt>
+  <CdtDbtInd>DBIT</CdtDbtInd>
+  <RvslInd>false</RvslInd>
+  <Sts><Cd>BOOK</Cd></Sts>
+  <BookgDt><Dt>2026-04-01</Dt></BookgDt>
+  <ValDt><Dt>2026-04-01</Dt></ValDt>
+  <AcctSvcrRef>CARDREF</AcctSvcrRef>
+  <AddtlNtryInf>Achat Coop
+30.03.2026, 14:45, No carte Visa Debit 400000xxxxxx0002</AddtlNtryInf>
+</Ntry>
+"""
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry_xml("5.80", "DBIT", "TWINTREF", "Achat TWINT SBB MOBILE", booking_date="2026-03-31", value_date="2026-03-31")
+            + entry_xml("58.95", "DBIT", "BILLREF", "Insurance Example AG", booking_date="2026-04-01", value_date="2026-04-01")
+            + card_entry,
+            opening="100.00",
+            closing="-23.40",
+        )
+    )
+
+    upload = client.post("/uploads", files={"file": ("ordered.xml", content, "application/xml")}, follow_redirects=False)
+
+    assert upload.status_code == 303
+    job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
+    assert job is not None
+    assert [(row["transaction"]["booking_date"], row["transaction"]["payee"]) for row in job["payload"]["rows"]] == [
+        ("2026-03-30", "Coop"),
+        ("2026-03-31", "SBB Mobile"),
+        ("2026-04-01", "Insurance Example AG"),
+    ]
+
+
 def test_upload_preview_applies_rule_metadata_and_import_sends_category(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
     client, store, gateway = app_client
     login(client)
