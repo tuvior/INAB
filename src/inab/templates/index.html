@@ -4,7 +4,7 @@
 <section class="toolbar-section">
   <div>
     <h1>Import bank statements</h1>
-    <p class="muted">CAMT.053 XML exports are parsed locally, previewed, then sent to YNAB after confirmation.</p>
+    <p class="muted">CAMT.053 XML and supported CSV exports are parsed locally, previewed, then sent to YNAB after confirmation.</p>
   </div>
   <a class="button secondary" href="/setup">Setup</a>
 </section>
@@ -38,8 +38,8 @@
 <section class="panel upload-panel">
   <form id="upload-form" method="post" action="/uploads" enctype="multipart/form-data">
     <label id="drop-zone" class="drop-zone">
-      <input id="file-input" name="file" type="file" accept=".xml,text/xml,application/xml" required>
-      <span class="drop-title">Drop a CAMT.053 XML file</span>
+      <input id="file-input" name="file" type="file" accept=".xml,.csv,text/xml,application/xml,text/csv" required>
+      <span class="drop-title">Drop a CAMT.053 XML or CSV file</span>
       <span id="file-name" class="muted">or choose one from disk</span>
     </label>
     <div class="form-actions">

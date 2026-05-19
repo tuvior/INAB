@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from inab.camt import CamtParseError, UnsupportedFormatError, parse_camt, parse_upload
+from inab.camt import CamtParseError, UnsupportedFormatError, parse_camt, parse_csv_export, parse_upload
 
 from conftest import camt_document, entry_xml, statement_xml
 
@@ -51,7 +51,33 @@ def test_multi_account_camt_groups_by_statement() -> None:
 
 def test_rejects_unsupported_file_extension() -> None:
     with pytest.raises(UnsupportedFormatError):
-        parse_upload("export.csv", b"not xml")
+        parse_upload("export.mt940", b"not supported")
+
+
+def test_csv_upload_requires_configured_account() -> None:
+    with pytest.raises(CamtParseError, match="CSV uploads require"):
+        parse_upload("export.csv", b'"Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"\n')
+
+
+def test_supported_csv_export_parses_with_configured_account() -> None:
+    content = b'''"Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
+"2026-04-30";"600.00";"";"";"";"Alex Example";"";"income";"";"no";"no"
+"2026-04-28";"-16.57";"-17.90";"EUR";"1.08027";"SAMPLE BISTRO";;"food";"";"no";"no"
+'''
+
+    result = parse_csv_export("neon.csv", content, account_iban="CH999", target_currency="CHF")
+
+    assert result.ibans == ["CH999"]
+    assert len(result.transactions) == 2
+    assert result.statements[0].period_start.isoformat() == "2026-04-28"
+    assert result.statements[0].period_end.isoformat() == "2026-04-30"
+    assert result.statements[0].balances_reconcile is None
+    assert [tx.amount for tx in result.transactions] == [Decimal("600.00"), Decimal("-16.57")]
+    assert [tx.payee for tx in result.transactions] == ["Alex Example", "Sample Bistro"]
+    assert result.transactions[0].import_id.startswith("INAB:")
+    assert result.transactions[0].source_ref is None
+    assert "Category: income" in (result.transactions[0].memo or "")
+    assert "Original amount: -17.90 EUR at 1.08027" in (result.transactions[1].memo or "")
 
 
 def test_rejects_non_chf_statement() -> None:
@@ -100,6 +126,7 @@ def test_single_generic_entry_uses_detail_counterparty_and_memo() -> None:
         <Cdtr><Pty><Nm>Regie Example SA</Nm></Pty></Cdtr>
         <CdtrAcct><Id><IBAN>CH0000000000000000001</IBAN></Id></CdtrAcct>
       </RltdPties>
+      <RltdAgts><CdtrAgt><FinInstnId><Nm>Example Bank AG</Nm></FinInstnId></CdtrAgt></RltdAgts>
       <RmtInf><Ustrd>Loyer mai 2026</Ustrd></RmtInf>
     </TxDtls>
   </NtryDtls>
@@ -117,6 +144,10 @@ def test_single_generic_entry_uses_detail_counterparty_and_memo() -> None:
     assert tx.memo and "Ordre permanent" in tx.memo
     assert "Loyer mai 2026" in tx.memo
     assert "Counterparty IBAN: CH0000000000000000001" in tx.memo
+    assert "Counterparty bank: Example Bank AG" in tx.memo
+    assert tx.counterparty_name == "Regie Example SA"
+    assert tx.counterparty_iban == "CH0000000000000000001"
+    assert tx.counterparty_bank == "Example Bank AG"
 
 
 def test_grouped_payment_splits_reconciled_transaction_details() -> None:

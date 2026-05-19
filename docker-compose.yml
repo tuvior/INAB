@@ -15,6 +15,8 @@ services:
       INAB_DATA_DIR: "/data"
       INAB_MAX_UPLOAD_BYTES: "${INAB_MAX_UPLOAD_BYTES:-10485760}"
       INAB_TARGET_CURRENCY: "${INAB_TARGET_CURRENCY:-CHF}"
+      INAB_SELF_NAMES: "${INAB_SELF_NAMES:-}"
+      INAB_CSV_ACCOUNT_IBAN: "${INAB_CSV_ACCOUNT_IBAN:-}"
     volumes:
       - inab-data:/data
 

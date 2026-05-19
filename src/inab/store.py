@@ -23,6 +23,28 @@ class AccountMapping:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class CounterpartyAccountMapping:
+    iban: str
+    label: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class ImportRule:
+    id: str
+    name: str
+    enabled: bool
+    priority: int
+    operator: str
+    pattern: str
+    replacement_payee: str | None
+    category_id: str | None
+    category_name: str | None
+    created_at: str
+    updated_at: str
+
+
 class Store:
     def __init__(self, database_path: Path):
         self.database_path = database_path
@@ -64,6 +86,43 @@ class Store:
                     last_seen_at text not null
                 );
 
+                create table if not exists observed_counterparty_accounts (
+                    iban text primary key,
+                    name text,
+                    bank_name text,
+                    last_seen_at text not null
+                );
+
+                create table if not exists dismissed_observed_accounts (
+                    iban text primary key,
+                    dismissed_at text not null
+                );
+
+                create table if not exists dismissed_observed_counterparty_accounts (
+                    iban text primary key,
+                    dismissed_at text not null
+                );
+
+                create table if not exists counterparty_account_mappings (
+                    iban text primary key,
+                    label text not null,
+                    updated_at text not null
+                );
+
+                create table if not exists import_rules (
+                    id text primary key,
+                    name text not null,
+                    enabled integer not null,
+                    priority integer not null,
+                    operator text not null,
+                    pattern text not null,
+                    replacement_payee text,
+                    category_id text,
+                    category_name text,
+                    created_at text not null,
+                    updated_at text not null
+                );
+
                 create table if not exists import_jobs (
                     id text primary key,
                     filename text not null,
@@ -99,6 +158,22 @@ class Store:
     def save_selected_plan(self, plan_id: str, plan_name: str) -> None:
         self.set_config("ynab_plan_id", plan_id)
         self.set_config("ynab_plan_name", plan_name)
+
+    def self_names(self) -> list[str]:
+        raw = self.get_config("self_names")
+        if not raw:
+            return []
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    def save_self_names(self, names: list[str]) -> None:
+        cleaned = [name.strip() for name in names if name.strip()]
+        self.set_config("self_names", json.dumps(cleaned))
 
     def upsert_mapping(
         self,
@@ -181,6 +256,220 @@ class Store:
             rows = connection.execute("select * from observed_accounts order by last_seen_at desc").fetchall()
         return [dict(row) for row in rows]
 
+    def dismiss_observed_account(self, iban: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                insert into dismissed_observed_accounts (iban, dismissed_at)
+                values (?, ?)
+                on conflict(iban) do update set dismissed_at = excluded.dismissed_at
+                """,
+                (iban.strip().upper(), now_iso()),
+            )
+
+    def dismissed_observed_account_ibans(self) -> set[str]:
+        with self.connect() as connection:
+            rows = connection.execute("select iban from dismissed_observed_accounts").fetchall()
+        return {row["iban"] for row in rows}
+
+    def observe_counterparty_account(self, *, iban: str, name: str | None, bank_name: str | None) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                insert into observed_counterparty_accounts (iban, name, bank_name, last_seen_at)
+                values (?, ?, ?, ?)
+                on conflict(iban) do update set
+                    name = coalesce(excluded.name, observed_counterparty_accounts.name),
+                    bank_name = coalesce(excluded.bank_name, observed_counterparty_accounts.bank_name),
+                    last_seen_at = excluded.last_seen_at
+                """,
+                (iban.strip().upper(), name, bank_name, now_iso()),
+            )
+
+    def list_observed_counterparty_accounts(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute("select * from observed_counterparty_accounts order by last_seen_at desc").fetchall()
+        return [dict(row) for row in rows]
+
+    def dismiss_observed_counterparty_account(self, iban: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                insert into dismissed_observed_counterparty_accounts (iban, dismissed_at)
+                values (?, ?)
+                on conflict(iban) do update set dismissed_at = excluded.dismissed_at
+                """,
+                (iban.strip().upper(), now_iso()),
+            )
+
+    def dismissed_observed_counterparty_ibans(self) -> set[str]:
+        with self.connect() as connection:
+            rows = connection.execute("select iban from dismissed_observed_counterparty_accounts").fetchall()
+        return {row["iban"] for row in rows}
+
+    def upsert_counterparty_mapping(self, *, iban: str, label: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                insert into counterparty_account_mappings (iban, label, updated_at)
+                values (?, ?, ?)
+                on conflict(iban) do update set
+                    label = excluded.label,
+                    updated_at = excluded.updated_at
+                """,
+                (iban.strip().upper(), label.strip(), now_iso()),
+            )
+
+    def delete_counterparty_mapping(self, iban: str) -> None:
+        with self.connect() as connection:
+            connection.execute("delete from counterparty_account_mappings where iban = ?", (iban.strip().upper(),))
+
+    def list_counterparty_mappings(self) -> list[CounterpartyAccountMapping]:
+        with self.connect() as connection:
+            rows = connection.execute("select * from counterparty_account_mappings order by label, iban").fetchall()
+        return [
+            CounterpartyAccountMapping(
+                iban=row["iban"],
+                label=row["label"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    def counterparty_mappings_for(self, ibans: set[str]) -> dict[str, CounterpartyAccountMapping]:
+        if not ibans:
+            return {}
+        placeholders = ",".join("?" for _ in ibans)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"select * from counterparty_account_mappings where iban in ({placeholders})",
+                tuple(sorted(ibans)),
+            ).fetchall()
+        return {
+            row["iban"]: CounterpartyAccountMapping(
+                iban=row["iban"],
+                label=row["label"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        }
+
+    def create_rule(
+        self,
+        *,
+        name: str,
+        enabled: bool,
+        operator: str,
+        pattern: str,
+        replacement_payee: str | None,
+        category_id: str | None,
+        category_name: str | None,
+    ) -> str:
+        rule_id = uuid.uuid4().hex
+        timestamp = now_iso()
+        with self.connect() as connection:
+            row = connection.execute("select coalesce(max(priority), 0) as max_priority from import_rules").fetchone()
+            priority = int(row["max_priority"] or 0) + 100
+            connection.execute(
+                """
+                insert into import_rules
+                    (id, name, enabled, priority, operator, pattern, replacement_payee, category_id, category_name, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    rule_id,
+                    name,
+                    1 if enabled else 0,
+                    priority,
+                    operator,
+                    pattern,
+                    replacement_payee,
+                    category_id,
+                    category_name,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+        return rule_id
+
+    def update_rule(
+        self,
+        rule_id: str,
+        *,
+        name: str,
+        enabled: bool,
+        operator: str,
+        pattern: str,
+        replacement_payee: str | None,
+        category_id: str | None,
+        category_name: str | None,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                update import_rules set
+                    name = ?,
+                    enabled = ?,
+                    operator = ?,
+                    pattern = ?,
+                    replacement_payee = ?,
+                    category_id = ?,
+                    category_name = ?,
+                    updated_at = ?
+                where id = ?
+                """,
+                (
+                    name,
+                    1 if enabled else 0,
+                    operator,
+                    pattern,
+                    replacement_payee,
+                    category_id,
+                    category_name,
+                    now_iso(),
+                    rule_id,
+                ),
+            )
+
+    def delete_rule(self, rule_id: str) -> None:
+        with self.connect() as connection:
+            connection.execute("delete from import_rules where id = ?", (rule_id,))
+
+    def move_rule(self, rule_id: str, direction: str) -> None:
+        if direction not in {"up", "down"}:
+            return
+        with self.connect() as connection:
+            current = connection.execute("select id, priority from import_rules where id = ?", (rule_id,)).fetchone()
+            if not current:
+                return
+            comparator = "<" if direction == "up" else ">"
+            ordering = "desc" if direction == "up" else "asc"
+            swap = connection.execute(
+                f"""
+                select id, priority from import_rules
+                where priority {comparator} ?
+                order by priority {ordering}
+                limit 1
+                """,
+                (current["priority"],),
+            ).fetchone()
+            if not swap:
+                return
+            timestamp = now_iso()
+            connection.execute("update import_rules set priority = ?, updated_at = ? where id = ?", (swap["priority"], timestamp, current["id"]))
+            connection.execute("update import_rules set priority = ?, updated_at = ? where id = ?", (current["priority"], timestamp, swap["id"]))
+
+    def list_rules(self, *, enabled_only: bool = False) -> list[ImportRule]:
+        sql = "select * from import_rules"
+        params: tuple[Any, ...] = ()
+        if enabled_only:
+            sql += " where enabled = ?"
+            params = (1,)
+        sql += " order by priority, created_at"
+        with self.connect() as connection:
+            rows = connection.execute(sql, params).fetchall()
+        return [_rule_from_row(row) for row in rows]
+
     def create_job(self, *, filename: str, status: str, plan_id: str | None, payload: dict[str, Any]) -> str:
         job_id = uuid.uuid4().hex
         timestamp = now_iso()
@@ -221,3 +510,19 @@ class Store:
                 f"update import_jobs set {', '.join(assignments)} where id = ?",
                 tuple(values),
             )
+
+
+def _rule_from_row(row: sqlite3.Row) -> ImportRule:
+    return ImportRule(
+        id=row["id"],
+        name=row["name"],
+        enabled=bool(row["enabled"]),
+        priority=int(row["priority"]),
+        operator=row["operator"],
+        pattern=row["pattern"],
+        replacement_payee=row["replacement_payee"],
+        category_id=row["category_id"],
+        category_name=row["category_name"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -33,11 +35,114 @@ class CamtParseError(CamtError):
     pass
 
 
-def parse_upload(filename: str, content: bytes, *, target_currency: str = "CHF") -> ParseResult:
+CSV_REQUIRED_COLUMNS = {
+    "Date",
+    "Amount",
+    "Original amount",
+    "Original currency",
+    "Exchange rate",
+    "Description",
+    "Subject",
+    "Category",
+    "Tags",
+    "Wise",
+    "Spaces",
+}
+
+
+def parse_upload(
+    filename: str,
+    content: bytes,
+    *,
+    target_currency: str = "CHF",
+    csv_account_iban: str | None = None,
+) -> ParseResult:
     suffix = Path(filename).suffix.lower()
-    if suffix != ".xml":
-        raise UnsupportedFormatError("Only CAMT.053 XML files are supported in this version.")
-    return parse_camt(content, target_currency=target_currency)
+    if suffix == ".xml":
+        return parse_camt(content, target_currency=target_currency)
+    if suffix == ".csv":
+        if not csv_account_iban:
+            raise CamtParseError("CSV uploads require a configured CSV account IBAN or account key.")
+        return parse_csv_export(filename, content, account_iban=csv_account_iban, target_currency=target_currency)
+    if suffix == ".mt940":
+        raise UnsupportedFormatError("MT940 files are not supported. Use CAMT.053 XML or the supported CSV export.")
+    raise UnsupportedFormatError("Only CAMT.053 XML and the supported CSV export are accepted.")
+
+
+def parse_csv_export(filename: str, content: bytes, *, account_iban: str, target_currency: str = "CHF") -> ParseResult:
+    account_iban = _normalize_account_key(account_iban)
+    if not account_iban:
+        raise CamtParseError("CSV account IBAN or account key is required.")
+    text = _decode_csv(content)
+    try:
+        reader = csv.DictReader(io.StringIO(text), delimiter=";", quotechar='"')
+        fieldnames = set(reader.fieldnames or [])
+        missing = sorted(CSV_REQUIRED_COLUMNS - fieldnames)
+        if missing:
+            raise CamtParseError(f"CSV export is missing required columns: {', '.join(missing)}")
+        raw_rows = [row for row in reader if any((value or "").strip() for value in row.values())]
+    except csv.Error as exc:
+        raise CamtParseError("The uploaded CSV could not be parsed.") from exc
+
+    statement_id = f"CSV:{Path(filename).stem}"
+    transactions: list[BankTransaction] = []
+    occurrence_by_key: dict[tuple[str, str, str, str, str], int] = defaultdict(int)
+    dates: list[date] = []
+    for sequence, row in enumerate(raw_rows, start=1):
+        booking_date = _parse_csv_date(row.get("Date"), sequence=sequence)
+        dates.append(booking_date)
+        amount = _parse_csv_amount(row.get("Amount"), sequence=sequence)
+        description = normalize_whitespace(row.get("Description"))
+        payee = payee_from_description(description)
+        memo = _csv_memo(row)
+        key = (account_iban, booking_date.isoformat(), str(amount), payee, memo or "")
+        occurrence_by_key[key] += 1
+        import_id = make_import_id(
+            iban=account_iban,
+            source_ref=None,
+            booking_date=booking_date,
+            amount=amount,
+            payee=payee,
+            memo=memo,
+            occurrence=occurrence_by_key[key],
+        )
+        transactions.append(
+            BankTransaction(
+                uid=f"{statement_id}:{sequence}",
+                statement_id=statement_id,
+                iban=account_iban,
+                currency=target_currency.upper(),
+                booking_date=booking_date,
+                value_date=booking_date,
+                amount=amount,
+                payee=payee,
+                memo=memo,
+                source_ref=None,
+                import_id=import_id,
+                sequence=sequence,
+                bank_code="CSV",
+                counterparty_name=description or payee,
+            )
+        )
+
+    statement = BankStatement(
+        statement_id=statement_id,
+        iban=account_iban,
+        currency=target_currency.upper(),
+        owner_name=None,
+        bank_name="CSV export",
+        period_start=min(dates) if dates else None,
+        period_end=max(dates) if dates else None,
+        opening_balance=None,
+        closing_balance=None,
+        transactions=transactions,
+    )
+    result = ParseResult(statements=[statement], skipped_entries=0)
+    duplicates = result.duplicate_import_ids_by_iban()
+    if duplicates:
+        details = ", ".join(f"{iban}: {', '.join(ids)}" for iban, ids in duplicates.items())
+        raise CamtParseError(f"Duplicate CSV rows would create duplicate import IDs: {details}")
+    return result
 
 
 def parse_camt(content: bytes, *, target_currency: str = "CHF") -> ParseResult:
@@ -106,11 +211,17 @@ def _parse_statement(element: ElementTree.Element, statement_index: int, *, targ
         booking_date = item["booking_date"]
         payee = item["payee"]
         memo = item["memo"]
+        counterparty_name = item["counterparty_name"]
+        counterparty_iban = item["counterparty_iban"]
+        counterparty_bank = item["counterparty_bank"]
         assert isinstance(source_ref, str | None)
         assert isinstance(amount, Decimal)
         assert isinstance(booking_date, date)
         assert isinstance(payee, str)
         assert isinstance(memo, str | None)
+        assert isinstance(counterparty_name, str | None)
+        assert isinstance(counterparty_iban, str | None)
+        assert isinstance(counterparty_bank, str | None)
         key = (iban, booking_date.isoformat(), str(amount), payee, memo or "")
         occurrence_by_key[key] += 1
         import_id = make_import_id(
@@ -137,6 +248,9 @@ def _parse_statement(element: ElementTree.Element, statement_index: int, *, targ
                 import_id=import_id,
                 sequence=int(item["sequence"]),
                 bank_code=item["bank_code"],  # type: ignore[arg-type]
+                counterparty_name=counterparty_name,
+                counterparty_iban=counterparty_iban,
+                counterparty_bank=counterparty_bank,
             )
         )
 
@@ -210,11 +324,12 @@ def _parse_entry_items(
 
     payee = payee_from_description(description)
     memo = truncate(description, 500)
+    counterparty = {"name": None, "iban": None, "bank": None}
     if details:
         detail = details[0]
-        counterparty = _counterparty_name(detail, signed_amount)
-        if counterparty and _is_generic_description(description):
-            payee = counterparty[:200]
+        counterparty = _counterparty_info(detail, signed_amount)
+        if counterparty["name"] and _is_generic_description(description):
+            payee = counterparty["name"][:200]
         memo = _detail_memo(description, detail, signed_amount)
 
     return [
@@ -229,6 +344,9 @@ def _parse_entry_items(
             "memo": memo,
             "source_ref": source_ref,
             "bank_code": bank_code,
+            "counterparty_name": counterparty["name"],
+            "counterparty_iban": counterparty["iban"],
+            "counterparty_bank": counterparty["bank"],
         }
     ]
 
@@ -272,7 +390,7 @@ def _split_detail_items(
 
     items: list[dict[str, object]] = []
     for detail_index, (detail, amount) in enumerate(parsed_details, start=1):
-        counterparty = _counterparty_name(detail, amount)
+        counterparty = _counterparty_info(detail, amount)
         source_ref = _detail_source_ref(detail, entry_source_ref=entry_source_ref, detail_index=detail_index)
         items.append(
             {
@@ -282,10 +400,13 @@ def _split_detail_items(
                 "booking_date": booking_date,
                 "value_date": value_date,
                 "amount": amount,
-                "payee": (counterparty or payee_from_description(entry_description))[:200],
+                "payee": (counterparty["name"] or payee_from_description(entry_description))[:200],
                 "memo": _detail_memo(entry_description, detail, amount),
                 "source_ref": source_ref,
                 "bank_code": bank_code,
+                "counterparty_name": counterparty["name"],
+                "counterparty_iban": counterparty["iban"],
+                "counterparty_bank": counterparty["bank"],
             }
         )
     return items
@@ -333,6 +454,61 @@ def _parse_balance(element: ElementTree.Element, *, fallback_currency: str) -> B
     return Balance(kind=kind, amount=amount, indicator=indicator, balance_date=balance_date, currency=currency)
 
 
+def _decode_csv(content: bytes) -> str:
+    for encoding in ("utf-8-sig", "utf-8", "iso-8859-1"):
+        try:
+            return content.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    raise CamtParseError("The uploaded CSV encoding is not supported.")
+
+
+def _parse_csv_date(value: str | None, *, sequence: int) -> date:
+    value = normalize_whitespace(value)
+    if not value:
+        raise CamtParseError(f"CSV row {sequence} has no date.")
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError as exc:
+        raise CamtParseError(f"CSV row {sequence} has an invalid date.") from exc
+
+
+def _parse_csv_amount(value: str | None, *, sequence: int) -> Decimal:
+    value = normalize_whitespace(value)
+    if not value:
+        raise CamtParseError(f"CSV row {sequence} has no amount.")
+    try:
+        return Decimal(value.replace("'", "").replace(",", "."))
+    except InvalidOperation as exc:
+        raise CamtParseError(f"CSV row {sequence} has an invalid amount.") from exc
+
+
+def _csv_memo(row: dict[str, str | None]) -> str | None:
+    parts: list[str] = []
+    description = normalize_whitespace(row.get("Description"))
+    if description:
+        parts.append(description)
+    for label, column in (
+        ("Subject", "Subject"),
+        ("Category", "Category"),
+        ("Tags", "Tags"),
+    ):
+        value = normalize_whitespace(row.get(column))
+        if value:
+            parts.append(f"{label}: {value}")
+    original_amount = normalize_whitespace(row.get("Original amount"))
+    original_currency = normalize_whitespace(row.get("Original currency"))
+    exchange_rate = normalize_whitespace(row.get("Exchange rate"))
+    if original_amount and original_currency:
+        suffix = f" at {exchange_rate}" if exchange_rate else ""
+        parts.append(f"Original amount: {original_amount} {original_currency}{suffix}")
+    for label, column in (("Wise", "Wise"), ("Spaces", "Spaces")):
+        value = normalize_whitespace(row.get(column))
+        if value:
+            parts.append(f"{label}: {value}")
+    return truncate("\n".join(parts), 500)
+
+
 def _first_balance(balances: Iterable[Balance], kind: str) -> Balance | None:
     for balance in balances:
         if balance.kind == kind:
@@ -358,24 +534,36 @@ def _entry_description(entry: ElementTree.Element) -> str:
     return normalize_whitespace("\n".join(texts))
 
 
-def _counterparty_name(detail: ElementTree.Element, signed_amount: Decimal) -> str | None:
+def _counterparty_info(detail: ElementTree.Element, signed_amount: Decimal) -> dict[str, str | None]:
     if signed_amount < 0:
-        paths = (
+        name_paths = (
             "RltdPties/Cdtr/Pty/Nm",
             "RltdPties/UltmtCdtr/Pty/Nm",
-            "RltdPties/Dbtr/Pty/Nm",
+        )
+        iban_paths = (
+            "RltdPties/CdtrAcct/Id/IBAN",
+            "RltdPties/UltmtCdtrAcct/Id/IBAN",
+        )
+        bank_paths = (
+            "RltdAgts/CdtrAgt/FinInstnId/Nm",
         )
     else:
-        paths = (
+        name_paths = (
             "RltdPties/Dbtr/Pty/Nm",
             "RltdPties/UltmtDbtr/Pty/Nm",
-            "RltdPties/Cdtr/Pty/Nm",
         )
-    for path in paths:
-        value = _text(detail, path)
-        if value:
-            return normalize_whitespace(value)
-    return None
+        iban_paths = (
+            "RltdPties/DbtrAcct/Id/IBAN",
+            "RltdPties/UltmtDbtrAcct/Id/IBAN",
+        )
+        bank_paths = (
+            "RltdAgts/DbtrAgt/FinInstnId/Nm",
+        )
+    return {
+        "name": _first_text(detail, name_paths, normalize=True),
+        "iban": _iban_text(_first_text(detail, iban_paths)),
+        "bank": _first_text(detail, bank_paths, normalize=True),
+    }
 
 
 def _detail_source_ref(detail: ElementTree.Element, *, entry_source_ref: str | None, detail_index: int) -> str | None:
@@ -409,6 +597,9 @@ def _detail_memo(base_description: str, detail: ElementTree.Element, signed_amou
     counterparty_iban = _text(detail, "RltdPties/CdtrAcct/Id/IBAN") if signed_amount < 0 else _text(detail, "RltdPties/DbtrAcct/Id/IBAN")
     if counterparty_iban:
         parts.append(f"Counterparty IBAN: {counterparty_iban}")
+    counterparty_bank = _counterparty_info(detail, signed_amount)["bank"]
+    if counterparty_bank:
+        parts.append(f"Counterparty bank: {counterparty_bank}")
     return truncate("\n".join(parts), 500)
 
 
@@ -438,6 +629,24 @@ def _text(element: ElementTree.Element, path: str) -> str | None:
     if found is None or found.text is None:
         return None
     return found.text.strip()
+
+
+def _first_text(element: ElementTree.Element, paths: Iterable[str], *, normalize: bool = False) -> str | None:
+    for path in paths:
+        value = _text(element, path)
+        if value:
+            return normalize_whitespace(value) if normalize else value
+    return None
+
+
+def _iban_text(value: str | None) -> str | None:
+    if not value:
+        return None
+    return "".join(value.upper().split())
+
+
+def _normalize_account_key(value: str) -> str:
+    return "".join(value.upper().split())
 
 
 def _strip_namespaces(root: ElementTree.Element) -> None:

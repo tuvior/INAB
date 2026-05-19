@@ -12,6 +12,8 @@ class Settings:
     username: str | None
     password: str | None
     session_secret: str
+    self_names: tuple[str, ...] = ()
+    csv_account_iban: str | None = None
     max_upload_bytes: int = 10 * 1024 * 1024
     target_currency: str = "CHF"
 
@@ -28,6 +30,8 @@ class Settings:
             username=username,
             password=password,
             session_secret=session_secret,
+            self_names=_parse_csv(os.environ.get("INAB_SELF_NAMES")),
+            csv_account_iban=_normalize_account_key(os.environ.get("INAB_CSV_ACCOUNT_IBAN")),
             max_upload_bytes=max_upload_bytes,
             target_currency=os.environ.get("INAB_TARGET_CURRENCY", "CHF").upper(),
         )
@@ -43,3 +47,16 @@ class Settings:
     @property
     def database_path(self) -> Path:
         return self.data_dir / "inab.sqlite3"
+
+
+def _parse_csv(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def _normalize_account_key(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = "".join(value.upper().split())
+    return normalized or None

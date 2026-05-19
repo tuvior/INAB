@@ -24,7 +24,11 @@ def test_payee_from_card_purchase_description() -> None:
 def test_payee_from_online_purchase_description() -> None:
     assert (
         payee_from_description("Achat online Example Relay 30.04.2026, 01:32, No carte Visa Debit 400000xxxxxx0002")
-        == "Example Relay"
+        == "Relay for redd"
+    )
+    assert (
+        payee_from_description("Achat online Example Subscription 30.04.2026, 01:32, No carte Visa Debit 400000xxxxxx0002")
+        == "ChatGPT"
     )
     assert (
         payee_from_description(

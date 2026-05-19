@@ -1,6 +1,6 @@
 # Format Choice
 
-INAB v1 supports CAMT.053 XML and rejects CSV/MT940 uploads with a clear message.
+INAB v1 supports CAMT.053 XML and one semicolon-delimited CSV export. MT940 uploads are rejected with a clear message.
 
 ## Samples Analyzed
 
@@ -9,6 +9,8 @@ The local `sample/` directory contains:
 - `camt053_001_08_ch0000000000000000000_20260519071007.xml`
 - `Konto_CH0000000000000000000_20260519071045.csv`
 - `Konto_CH0000000000000000000_20260519071028.mt940`
+- `2026_4_account_statements19052026114500.csv`
+- `2026_4_account_statements19052026114515.csv`
 
 The sample directory is intentionally gitignored because the files contain private banking data.
 
@@ -24,12 +26,13 @@ Observed strengths:
 - The sample has 90 booked entries and every entry has a unique `AcctSvcrRef`.
 - The sample opening balance plus signed movement total reconciles to the closing balance.
 - Multiline transaction descriptions survive without CSV quoting or encoding ambiguity.
+- Updated samples include detailed `NtryDtls/TxDtls` blocks for generic entries such as `Ordre permanent`, including counterparty name, IBAN, bank agent, remittance text, and structured references.
 
 This gives INAB enough information to group by bank account, validate balances, create stable YNAB import IDs, and block unknown IBANs before import.
 
-## CSV
+## Raiffeisen CSV
 
-The CSV export is easy to inspect but weaker for safe imports.
+The original Raiffeisen CSV export is easy to inspect but weaker for safe imports.
 
 Observed fields:
 
@@ -40,7 +43,27 @@ Observed fields:
 - `Balance`
 - `Valuta Date`
 
-The CSV sample has 90 April rows and the same CHF 740.37 total movement as the CAMT sample. Its main drawback is that it has no stable per-transaction bank reference. Duplicate prevention would have to rely on date, amount, payee text, and occurrence counting, which is less robust than CAMT `AcctSvcrRef`. The file is also ISO-8859 text, which adds encoding risk.
+The Raiffeisen CSV sample has 90 April rows and the same CHF 740.37 total movement as the CAMT sample. Its main drawback is that it has no stable per-transaction bank reference. Duplicate prevention would have to rely on date, amount, payee text, and occurrence counting, which is less robust than CAMT `AcctSvcrRef`. The file is also ISO-8859 text, which adds encoding risk.
+
+## Other-Bank CSV
+
+The newer CSV export has these columns:
+
+- `Date`
+- `Amount`
+- `Original amount`
+- `Original currency`
+- `Exchange rate`
+- `Description`
+- `Subject`
+- `Category`
+- `Tags`
+- `Wise`
+- `Spaces`
+
+This CSV is supported because it is the only available export for that bank. The account identifier is not present in the file, so INAB requires a configured CSV account IBAN or account key before upload. The `Amount` column is treated as the signed account-currency amount. The original amount, currency, and exchange rate are retained in the memo for FX card transactions.
+
+The April CSV sample has 24 transactions, covers 2026-04-03 through 2026-04-30, and includes the expected CHF 600.00 inflow from the Raiffeisen outflow visible in the CAMT sample.
 
 ## MT940
 
@@ -55,6 +78,6 @@ Observed traits:
 
 ## Decision
 
-Use CAMT.053 XML for v1.
+Prefer CAMT.053 XML when the bank offers it.
 
-CSV can be added later as a convenience fallback, but it should use YNAB-style occurrence import IDs and a stronger duplicate warning. MT940 should only be added if a concrete need appears, because CAMT carries richer structured data for the same bank export workflow.
+Use the supported CSV format for the bank that only exposes CSV. It uses deterministic hash-based import IDs derived from account key, date, amount, payee, memo, and occurrence count. MT940 should only be added if a concrete need appears, because CAMT carries richer structured data for the same bank export workflow.

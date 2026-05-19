@@ -133,6 +133,15 @@
             <td>{{ row.ynab_account_name or row.transaction.iban }}</td>
             <td>
               {{ row.transaction.payee }}
+              {% if row.transaction.original_payee %}
+                <span class="muted block">Original payee: {{ row.transaction.original_payee }}</span>
+              {% endif %}
+              {% if row.transaction.category_name %}
+                <span class="muted block">Category: {{ row.transaction.category_name }}</span>
+              {% endif %}
+              {% if row.transaction.applied_rule_name %}
+                <span class="muted block">Rule: {{ row.transaction.applied_rule_name }}</span>
+              {% endif %}
               {% if row.transaction.memo %}
                 <span class="muted block">{{ row.transaction.memo }}</span>
               {% endif %}

@@ -12,7 +12,7 @@ from inab.config import Settings
 from inab.models import BankTransaction
 from inab.store import Store
 from inab.web import create_app
-from inab.ynab_api import CreateTransactionsResult, YnabAccount, YnabPlan
+from inab.ynab_api import CreateTransactionsResult, YnabAccount, YnabCategory, YnabPayee, YnabPlan
 
 
 def camt_document(statements: str) -> bytes:
@@ -102,6 +102,17 @@ class FakeGateway:
             YnabAccount(id="checking-id", name="Checking", type="checking", closed=False, deleted=False, transfer_payee_id="tp-checking"),
             YnabAccount(id="savings-id", name="Savings", type="savings", closed=False, deleted=False, transfer_payee_id="tp-savings"),
         ]
+        self.categories = [
+            YnabCategory(id="cat-food", name="Food", group_name="Everyday", hidden=False, deleted=False),
+            YnabCategory(id="cat-hidden", name="Hidden", group_name="Old", hidden=True, deleted=False),
+            YnabCategory(id="cat-deleted", name="Deleted", group_name="Old", hidden=False, deleted=True),
+        ]
+        self.payees = [
+            YnabPayee(id="payee-coop", name="Coop Pronto", transfer_account_id=None, deleted=False),
+            YnabPayee(id="payee-sbb", name="SBB Mobile", transfer_account_id=None, deleted=False),
+            YnabPayee(id="payee-transfer", name="Transfer : Savings", transfer_account_id="savings-id", deleted=False),
+            YnabPayee(id="payee-deleted", name="Deleted Payee", transfer_account_id=None, deleted=True),
+        ]
         self.existing: dict[tuple[str, str], set[str]] = {}
         self.created: list[dict[str, Any]] = []
 
@@ -110,6 +121,12 @@ class FakeGateway:
 
     def list_accounts(self, plan_id: str) -> list[YnabAccount]:
         return self.accounts
+
+    def list_categories(self, plan_id: str) -> list[YnabCategory]:
+        return self.categories
+
+    def list_payees(self, plan_id: str) -> list[YnabPayee]:
+        return self.payees
 
     def existing_import_ids(self, plan_id: str, account_id: str, since_date: date) -> set[str]:
         return self.existing.get((plan_id, account_id), set())

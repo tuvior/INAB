@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% block title %}Rules - INAB{% endblock %}
+{% block content %}
+<section class="toolbar-section">
+  <div>
+    <h1>Rules</h1>
+    <p class="muted">Rewrite payees and assign YNAB categories before preview and import.</p>
+  </div>
+  <a class="button secondary" href="/setup">Setup</a>
+</section>
+
+{% if error %}
+  <div class="alert alert-error">{{ error }}</div>
+{% endif %}
+{% if category_error %}
+  <div class="alert alert-error">{{ category_error }}</div>
+{% endif %}
+{% if payee_error and payee_error != category_error %}
+  <div class="alert alert-error">{{ payee_error }}</div>
+{% endif %}
+
+<section class="status-grid">
+  <div class="panel">
+    <h2>Rules</h2>
+    <p class="metric">{{ rules|length }}</p>
+    <p class="muted">Configured locally</p>
+  </div>
+  <div class="panel">
+    <h2>Payees</h2>
+    <p class="metric">{{ payees|length }}</p>
+    <p class="muted">Loaded from YNAB</p>
+  </div>
+  <div class="panel">
+    <h2>Affected</h2>
+    <p class="metric">{{ payees|selectattr("evaluation.matched")|list|length }}</p>
+    <p class="muted">First matching rule wins</p>
+  </div>
+</section>
+
+<section class="panel form-stack">
+  <h2>Add rule</h2>
+  <form class="rule-form" method="post" action="/rules">
+    <input type="hidden" name="action" value="create_rule">
+    <label>
+      <span>Name</span>
+      <input name="name" required>
+    </label>
+    <label>
+      <span>Operator</span>
+      <select name="operator" required>
+        {% for value, label in operators %}
+          <option value="{{ value }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>Pattern</span>
+      <input name="pattern" required>
+    </label>
+    <label>
+      <span>Replacement payee</span>
+      <input name="replacement_payee">
+    </label>
+    <label>
+      <span>Category</span>
+      <select name="category" {% if not categories %}disabled{% endif %}>
+        <option value="">No category</option>
+        {% for category in categories %}
+          <option value="{{ category_choice(category) }}">{{ category.group_name }}: {{ category.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="checkbox-label">
+      <input name="enabled" type="checkbox" value="1" checked>
+      <span>Enabled</span>
+    </label>
+    <div class="form-actions rule-actions">
+      <button type="submit">Add rule</button>
+    </div>
+  </form>
+</section>
+
+<section class="panel form-stack">
+  <h2>Test transaction</h2>
+  <form class="inline-form" method="post" action="/rules">
+    <input type="hidden" name="action" value="test_rule">
+    <label class="grow">
+      <span>Payee</span>
+      <input name="test_payee" value="{{ test_payee }}" placeholder="Imported payee">
+    </label>
+    <label class="grow">
+      <span>Memo</span>
+      <input name="test_memo" value="{{ test_memo }}" placeholder="Optional memo">
+    </label>
+    <button type="submit">Test</button>
+  </form>
+  {% if test_result %}
+    <div class="rule-test-result">
+      {% if test_result.matched %}
+        <strong>{{ test_result.matched_rule_name }}</strong>
+        <span class="muted">would produce</span>
+        <span>{{ test_result.output_payee }}</span>
+        {% if test_result.output_category_name %}
+          <span class="chip">{{ test_result.output_category_name }}</span>
+        {% endif %}
+      {% else %}
+        <span class="muted">No rule would match. Output payee: {{ test_result.output_payee }}</span>
+      {% endif %}
+    </div>
+  {% endif %}
+</section>
+
+<section>
+  <h2>YNAB payees</h2>
+  {% if not payees %}
+    <p class="muted">No payees loaded.</p>
+  {% else %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Payee</th>
+            <th>Matched rule</th>
+            <th>Output</th>
+            <th>Category</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in payees %}
+            <tr>
+              <td>
+                {{ item.payee.name }}
+                {% if item.is_transfer %}
+                  <span class="muted block">Transfer payee</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if item.evaluation.matched %}
+                  {{ item.evaluation.matched_rule_name }}
+                {% else %}
+                  <span class="muted">No match</span>
+                {% endif %}
+              </td>
+              <td>{{ item.evaluation.output_payee }}</td>
+              <td>
+                {% if item.evaluation.output_category_name %}
+                  {{ item.evaluation.output_category_name }}
+                {% else %}
+                  <span class="muted">No category</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Saved rules</h2>
+  {% if not rule_views %}
+    <p class="muted">No rules configured.</p>
+  {% else %}
+    <div class="rule-list">
+      {% for view in rule_views %}
+        {% set rule = view.rule %}
+        <article class="panel rule-card">
+          <form class="rule-form" method="post" action="/rules">
+            <input type="hidden" name="action" value="update_rule">
+            <input type="hidden" name="rule_id" value="{{ rule.id }}">
+            <label>
+              <span>Name</span>
+              <input name="name" value="{{ rule.name }}" required>
+            </label>
+            <label>
+              <span>Operator</span>
+              <select name="operator" required>
+                {% for value, label in operators %}
+                  <option value="{{ value }}" {% if value == rule.operator %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              <span>Pattern</span>
+              <input name="pattern" value="{{ rule.pattern }}" required>
+            </label>
+            <label>
+              <span>Replacement payee</span>
+              <input name="replacement_payee" value="{{ rule.replacement_payee or '' }}">
+            </label>
+            <label>
+              <span>Category</span>
+              {% if categories %}
+                <select name="category">
+                  <option value="">No category</option>
+                  {% for category in categories %}
+                    {% set choice = category_choice(category) %}
+                    <option value="{{ choice }}" {% if category.id == rule.category_id %}selected{% endif %}>{{ category.group_name }}: {{ category.name }}</option>
+                  {% endfor %}
+                </select>
+              {% else %}
+                <input type="hidden" name="category" value="{% if rule.category_id and rule.category_name %}{{ rule.category_id }}	{{ rule.category_name }}{% endif %}">
+                <input value="{{ rule.category_name or 'No category' }}" disabled>
+              {% endif %}
+              {% if view.category_stale %}
+                <span class="muted block">Stale category: {{ rule.category_name }}</span>
+              {% endif %}
+            </label>
+            <label class="checkbox-label">
+              <input name="enabled" type="checkbox" value="1" {% if rule.enabled %}checked{% endif %}>
+              <span>Enabled</span>
+            </label>
+            <div class="form-actions rule-actions">
+              <button type="submit">Save</button>
+            </div>
+          </form>
+          <div class="rule-row-actions">
+            <form method="post" action="/rules">
+              <input type="hidden" name="action" value="move_rule">
+              <input type="hidden" name="rule_id" value="{{ rule.id }}">
+              <input type="hidden" name="direction" value="up">
+              <button class="secondary" type="submit">Move up</button>
+            </form>
+            <form method="post" action="/rules">
+              <input type="hidden" name="action" value="move_rule">
+              <input type="hidden" name="rule_id" value="{{ rule.id }}">
+              <input type="hidden" name="direction" value="down">
+              <button class="secondary" type="submit">Move down</button>
+            </form>
+            <form method="post" action="/rules">
+              <input type="hidden" name="action" value="delete_rule">
+              <input type="hidden" name="rule_id" value="{{ rule.id }}">
+              <button class="secondary danger" type="submit">Delete</button>
+            </form>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

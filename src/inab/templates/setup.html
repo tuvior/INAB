@@ -4,7 +4,7 @@
 <section class="toolbar-section">
   <div>
     <h1>Setup</h1>
-    <p class="muted">Select one YNAB plan, then map every bank IBAN to the matching YNAB account.</p>
+    <p class="muted">Manage YNAB connection, bank-account mappings, and personal import helpers.</p>
   </div>
 </section>
 
@@ -15,102 +15,252 @@
   <div class="alert alert-error">YNAB_ACCESS_TOKEN is not configured.</div>
 {% endif %}
 
-<section class="panel form-stack">
-  <h2>YNAB plan</h2>
-  <form class="inline-form" method="post" action="/setup">
-    <input type="hidden" name="action" value="plan">
-    <label class="grow">
-      <span>Plan</span>
-      <select name="plan_id" required>
-        <option value="">Select a plan</option>
-        {% for plan in plans %}
-          <option value="{{ plan.id }}" {% if plan.id == selected_plan_id %}selected{% endif %}>{{ plan.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button type="submit">Save plan</button>
-  </form>
-  {% if selected_plan_name %}
-    <p class="muted">Current plan: {{ selected_plan_name }}</p>
-  {% endif %}
+<section class="setup-section">
+  <div class="setup-section-header">
+    <h2>YNAB</h2>
+    <p class="muted">Choose the budget and connect bank account identifiers to YNAB accounts.</p>
+  </div>
+  <div class="setup-grid">
+    <section class="panel form-stack compact-panel">
+      <h3>Budget</h3>
+      <form class="inline-form" method="post" action="/setup">
+        <input type="hidden" name="action" value="plan">
+        <label class="grow">
+          <span>Plan</span>
+          <select name="plan_id" required>
+            <option value="">Select a plan</option>
+            {% for plan in plans %}
+              <option value="{{ plan.id }}" {% if plan.id == selected_plan_id %}selected{% endif %}>{{ plan.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <button type="submit">Save plan</button>
+      </form>
+      {% if selected_plan_name %}
+        <p class="muted">Current plan: {{ selected_plan_name }}</p>
+      {% endif %}
+    </section>
+
+    <section class="panel form-stack compact-panel">
+      <h3>CSV account</h3>
+      <p class="muted">CSV exports do not include an account IBAN. Use the IBAN or account key that should represent those uploads.</p>
+      <form class="inline-form" method="post" action="/setup">
+        <input type="hidden" name="action" value="csv_account">
+        <label class="grow">
+          <span>CSV account IBAN or key</span>
+          <input name="csv_account_iban" value="{{ csv_account_iban }}" placeholder="CH...">
+        </label>
+        <button type="submit">Save</button>
+      </form>
+    </section>
+  </div>
 </section>
 
-<section class="panel">
-  <h2>IBAN mappings</h2>
-  {% if not selected_plan_id %}
-    <p class="muted">Select a plan before adding mappings.</p>
-  {% elif not accounts %}
-    <p class="muted">No active YNAB accounts are available.</p>
-  {% else %}
-    <div class="mapping-list">
-      {% for observed in observed_accounts %}
-        <form class="mapping-row" method="post" action="/setup">
-          <input type="hidden" name="action" value="mapping">
-          <input type="hidden" name="iban" value="{{ observed.iban }}">
-          <div>
-            <strong>{{ observed.iban }}</strong>
-            <span class="muted">{{ observed.currency }}{% if observed.owner_name %} · {{ observed.owner_name }}{% endif %}</span>
+<section class="setup-section">
+  <div class="setup-section-header">
+    <h2>Bank Accounts</h2>
+    <p class="muted">Map account identifiers found in uploads. Suggestions hide once mapped or dismissed.</p>
+  </div>
+
+  <section class="panel">
+    <div class="panel-heading">
+      <div>
+        <h3>Mapping suggestions</h3>
+        <p class="muted">Unmapped accounts discovered from uploads.</p>
+      </div>
+    </div>
+    {% if not selected_plan_id %}
+      <p class="muted">Select a plan before adding mappings.</p>
+    {% elif not accounts %}
+      <p class="muted">No active YNAB accounts are available.</p>
+    {% elif observed_account_suggestions %}
+      <div class="mapping-list">
+        {% for observed in observed_account_suggestions %}
+          <div class="mapping-row mapping-row-with-dismiss">
+            <form class="mapping-row-form" method="post" action="/setup">
+              <input type="hidden" name="action" value="mapping">
+              <input type="hidden" name="iban" value="{{ observed.iban }}">
+              <div>
+                <strong>{{ observed.iban }}</strong>
+                <span class="muted">{{ observed.currency }}{% if observed.owner_name %} · {{ observed.owner_name }}{% endif %}</span>
+              </div>
+              <select name="ynab_account_id" required>
+                <option value="">Map to account</option>
+                {% for account in accounts %}
+                  <option value="{{ account.id }}">{{ account.name }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit">Save</button>
+            </form>
+            <form method="post" action="/setup">
+              <input type="hidden" name="action" value="dismiss_observed_account">
+              <input type="hidden" name="iban" value="{{ observed.iban }}">
+              <button class="secondary" type="submit">Dismiss</button>
+            </form>
           </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No unmapped account suggestions.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel form-stack">
+    <h3>Manual mapping</h3>
+    {% if selected_plan_id and accounts %}
+      <form class="inline-form" method="post" action="/setup">
+        <input type="hidden" name="action" value="mapping">
+        <label class="grow">
+          <span>IBAN or account key</span>
+          <input name="iban" placeholder="CH..." required>
+        </label>
+        <label class="grow">
+          <span>YNAB account</span>
           <select name="ynab_account_id" required>
-            <option value="">Map to account</option>
+            <option value="">Select an account</option>
             {% for account in accounts %}
               <option value="{{ account.id }}">{{ account.name }}</option>
             {% endfor %}
           </select>
-          <button type="submit">Save</button>
-        </form>
-      {% endfor %}
-    </div>
+        </label>
+        <button type="submit">Add mapping</button>
+      </form>
+    {% else %}
+      <p class="muted">Select a plan before adding manual mappings.</p>
+    {% endif %}
+  </section>
 
-    <form class="inline-form manual-map" method="post" action="/setup">
-      <input type="hidden" name="action" value="mapping">
-      <label class="grow">
-        <span>IBAN</span>
-        <input name="iban" placeholder="CH..." required>
-      </label>
-      <label class="grow">
-        <span>YNAB account</span>
-        <select name="ynab_account_id" required>
-          <option value="">Select an account</option>
-          {% for account in accounts %}
-            <option value="{{ account.id }}">{{ account.name }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <button type="submit">Add mapping</button>
-    </form>
+  {% if mappings %}
+    <section>
+      <h3>Saved mappings</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>IBAN</th>
+              <th>YNAB account</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for mapping in mappings %}
+              <tr>
+                <td>{{ mapping.iban }}</td>
+                <td>{{ mapping.ynab_account_name }}</td>
+                <td class="right">
+                  <form method="post" action="/setup">
+                    <input type="hidden" name="action" value="delete_mapping">
+                    <input type="hidden" name="iban" value="{{ mapping.iban }}">
+                    <button class="secondary" type="submit">Remove</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
   {% endif %}
 </section>
 
-{% if mappings %}
-<section>
-  <h2>Saved mappings</h2>
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>IBAN</th>
-          <th>YNAB account</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for mapping in mappings %}
-          <tr>
-            <td>{{ mapping.iban }}</td>
-            <td>{{ mapping.ynab_account_name }}</td>
-            <td class="right">
-              <form method="post" action="/setup">
-                <input type="hidden" name="action" value="delete_mapping">
-                <input type="hidden" name="iban" value="{{ mapping.iban }}">
-                <button class="secondary" type="submit">Remove</button>
-              </form>
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<section class="setup-section">
+  <div class="setup-section-header">
+    <h2>Personal Helpers</h2>
+    <p class="muted">Identify your own name and label external accounts that appear as counterparties.</p>
   </div>
+  <div class="setup-grid">
+    <section class="panel form-stack compact-panel">
+      <h3>Own-name aliases</h3>
+      <p class="muted">Rows paid to one of these names can be relabeled when their counterparty IBAN is mapped.</p>
+      <form class="form-stack" method="post" action="/setup">
+        <input type="hidden" name="action" value="self_names">
+        <label>
+          <span>Names</span>
+          <textarea name="self_names" rows="3" placeholder="Alex Example, Example Alex">{{ self_names }}</textarea>
+        </label>
+        <div class="form-actions">
+          <button type="submit">Save aliases</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel form-stack compact-panel">
+      <h3>Counterparty label</h3>
+      <p class="muted">Label accounts outside uploaded YNAB accounts, such as pension, mortgage, or another bank.</p>
+      <form class="inline-form" method="post" action="/setup">
+        <input type="hidden" name="action" value="counterparty_mapping">
+        <label class="grow">
+          <span>Counterparty IBAN</span>
+          <input name="iban" placeholder="CH..." required>
+        </label>
+        <label class="grow">
+          <span>Label</span>
+          <input name="label" placeholder="Account label" required>
+        </label>
+        <button type="submit">Add label</button>
+      </form>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h3>Counterparty suggestions</h3>
+    {% if observed_counterparty_suggestions %}
+      <div class="mapping-list">
+        {% for observed in observed_counterparty_suggestions %}
+          <div class="mapping-row mapping-row-with-dismiss">
+            <form class="mapping-row-form" method="post" action="/setup">
+              <input type="hidden" name="action" value="counterparty_mapping">
+              <input type="hidden" name="iban" value="{{ observed.iban }}">
+              <div>
+                <strong>{{ observed.iban }}</strong>
+                <span class="muted">{% if observed.name %}{{ observed.name }}{% endif %}{% if observed.bank_name %} · {{ observed.bank_name }}{% endif %}</span>
+              </div>
+              <input name="label" placeholder="e.g. External savings" required>
+              <button type="submit">Save</button>
+            </form>
+            <form method="post" action="/setup">
+              <input type="hidden" name="action" value="dismiss_observed_counterparty">
+              <input type="hidden" name="iban" value="{{ observed.iban }}">
+              <button class="secondary" type="submit">Dismiss</button>
+            </form>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">No unlabeled counterparty suggestions.</p>
+    {% endif %}
+  </section>
+
+  {% if counterparty_mappings %}
+    <section>
+      <h3>Saved counterparty labels</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>IBAN</th>
+              <th>Label</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for mapping in counterparty_mappings %}
+              <tr>
+                <td>{{ mapping.iban }}</td>
+                <td>{{ mapping.label }}</td>
+                <td class="right">
+                  <form method="post" action="/setup">
+                    <input type="hidden" name="action" value="delete_counterparty_mapping">
+                    <input type="hidden" name="iban" value="{{ mapping.iban }}">
+                    <button class="secondary" type="submit">Remove</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
 </section>
-{% endif %}
 {% endblock %}

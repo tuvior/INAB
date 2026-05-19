@@ -15,9 +15,9 @@ KNOWN_PAYEES = {
     "BKG BOOKING.COM HOTEL": "Booking.com",
     "BOOKING.COM HOTEL": "Booking.com",
     "DIGITEC GALAXUS": "Digitec Galaxus",
-    "GOOGLE CHATGPT": "Example Subscription",
-    "GOOGLE RELAY FOR REDD": "Example Relay",
-    "GOOGLE *RELAY FOR REDD": "Example Relay",
+    "GOOGLE CHATGPT": "ChatGPT",
+    "GOOGLE RELAY FOR REDD": "Relay for redd",
+    "GOOGLE *RELAY FOR REDD": "Relay for redd",
     "JUSTEAT": "Just Eat",
     "PARKINGPAY": "ParkingPay",
     "PLAYSTATION": "PlayStation",
@@ -29,7 +29,7 @@ KNOWN_PAYEES = {
     "SPOTIFYCH": "Spotify",
 }
 UPPERCASE_WORDS = {"AG", "AI", "SA", "SBB", "V", "VISA"}
-LOWERCASE_WORDS = {"de", "des", "du", "for", "la", "le", "of"}
+LOWERCASE_WORDS = {"de", "des", "du", "for", "la", "le", "of", "the"}
 
 
 def normalize_whitespace(value: str | None) -> str:
@@ -59,6 +59,7 @@ def payee_from_description(value: str, fallback: str = "Unknown payee") -> str:
     merchant = _strip_payee_prefix(normalized)
     merchant = _strip_card_purchase_details(merchant)
     merchant = _strip_noise_tokens(merchant)
+    merchant = _normalize_person_name(merchant)
     if not merchant:
         return normalized[:200]
     return _canonical_payee(merchant)[:200]
@@ -98,6 +99,14 @@ def _strip_noise_tokens(value: str) -> str:
     value = re.sub(r"-TWINT$", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+P[0-9A-Z]{6,}$", "", value, flags=re.IGNORECASE)
     return value.strip(" -,.")
+
+
+def _normalize_person_name(value: str) -> str:
+    match = re.fullmatch(r"([A-ZÀ-ÖØ-Þ][A-ZÀ-ÖØ-Þ' -]+),\s*([A-ZÀ-ÖØ-Þ][A-ZÀ-ÖØ-Þ' -]+)", value)
+    if not match:
+        return value
+    last_name, first_name = match.groups()
+    return f"{first_name} {last_name}"
 
 
 def _canonical_payee(value: str) -> str:
@@ -249,6 +258,14 @@ class BankTransaction:
     import_id: str
     sequence: int
     bank_code: str | None = None
+    counterparty_name: str | None = None
+    counterparty_iban: str | None = None
+    counterparty_bank: str | None = None
+    category_id: str | None = None
+    category_name: str | None = None
+    applied_rule_id: str | None = None
+    applied_rule_name: str | None = None
+    original_payee: str | None = None
 
     @property
     def milliunits(self) -> int:
@@ -273,6 +290,7 @@ class BankTransaction:
             payload["payee_id"] = transfer_payee_id
         else:
             payload["payee_name"] = self.payee[:200]
+            payload["category_id"] = self.category_id
         return {key: value for key, value in payload.items() if value is not None}
 
     def to_dict(self) -> dict[str, Any]:
@@ -290,6 +308,14 @@ class BankTransaction:
             "import_id": self.import_id,
             "sequence": self.sequence,
             "bank_code": self.bank_code,
+            "counterparty_name": self.counterparty_name,
+            "counterparty_iban": self.counterparty_iban,
+            "counterparty_bank": self.counterparty_bank,
+            "category_id": self.category_id,
+            "category_name": self.category_name,
+            "applied_rule_id": self.applied_rule_id,
+            "applied_rule_name": self.applied_rule_name,
+            "original_payee": self.original_payee,
             "milliunits": self.milliunits,
         }
 
@@ -309,6 +335,14 @@ class BankTransaction:
             import_id=data["import_id"],
             sequence=int(data["sequence"]),
             bank_code=data.get("bank_code"),
+            counterparty_name=data.get("counterparty_name"),
+            counterparty_iban=data.get("counterparty_iban"),
+            counterparty_bank=data.get("counterparty_bank"),
+            category_id=data.get("category_id"),
+            category_name=data.get("category_name"),
+            applied_rule_id=data.get("applied_rule_id"),
+            applied_rule_name=data.get("applied_rule_name"),
+            original_payee=data.get("original_payee"),
         )
 
 
