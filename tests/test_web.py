@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi.testclient import TestClient
 
 from inab.config import Settings
+from inab.models import make_import_id
 from inab.store import Store
 from inab.web import _save_plan, create_app, format_money
 from inab.ynab_api import YnabPlan
@@ -222,6 +225,7 @@ def test_upload_preview_marks_existing_import_id_as_duplicate(app_client: tuple[
     assert response.status_code == 200
     assert "duplicate" in response.text
     assert "INAB:REF1" in response.text
+    assert gateway.existing_calls == [("plan-1", "checking-id", date(2026, 4, 10))]
 
 
 def test_upload_preview_applies_rule_metadata_and_import_sends_category(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
@@ -317,6 +321,156 @@ def test_empty_statement_iban_does_not_block_preview(app_client: tuple[TestClien
     assert job is not None
     assert job["status"] == "preview"
     assert job["payload"]["missing_ibans"] == []
+
+
+def test_missing_iban_can_be_ignored_for_one_import(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+    client, store, gateway = app_client
+    login(client)
+    store.save_selected_plan("plan-1", "Household")
+    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    content = camt_document(
+        statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Mapped"), opening="100.00", closing="90.00")
+        + statement_xml("CH222", entry_xml("20.00", "DBIT", "REF2", "Unmapped"), opening="100.00", closing="80.00")
+    )
+
+    upload = client.post("/uploads", files={"file": ("multi.xml", content, "application/xml")}, follow_redirects=False)
+    assert upload.status_code == 303
+    job_id = upload.headers["location"].rsplit("/", 1)[1]
+    job = store.get_job(job_id)
+    assert job is not None
+    assert job["status"] == "blocked"
+    assert job["payload"]["missing_ibans"] == ["CH222"]
+
+    ignored = client.post(
+        f"/imports/{job_id}/ignored-ibans",
+        data={"ignored_ibans": "CH222"},
+        follow_redirects=False,
+    )
+
+    assert ignored.status_code == 303
+    updated_job = store.get_job(job_id)
+    assert updated_job is not None
+    assert updated_job["status"] == "preview"
+    assert updated_job["payload"]["missing_ibans"] == []
+    assert updated_job["payload"]["ignored_ibans"] == ["CH222"]
+    assert updated_job["payload"]["ignored_transaction_count"] == 1
+    assert [row["transaction"]["iban"] for row in updated_job["payload"]["rows"]] == ["CH111"]
+
+    response = client.post(f"/imports/{job_id}", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert len(gateway.created) == 1
+    assert gateway.created[0]["import_id"] == "INAB:REF1"
+
+
+def test_upload_preview_marks_duplicates_even_when_other_ibans_are_unmapped(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+    client, store, gateway = app_client
+    login(client)
+    store.save_selected_plan("plan-1", "Household")
+    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    gateway.existing[("plan-1", "checking-id")] = {"INAB:REF1"}
+    content = camt_document(
+        statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Mapped duplicate"), opening="100.00", closing="90.00")
+        + statement_xml("CH222", entry_xml("20.00", "DBIT", "REF2", "Unmapped"), opening="100.00", closing="80.00")
+    )
+
+    upload = client.post("/uploads", files={"file": ("mixed.xml", content, "application/xml")}, follow_redirects=False)
+
+    assert upload.status_code == 303
+    job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
+    assert job is not None
+    assert job["status"] == "blocked"
+    assert job["payload"]["missing_ibans"] == ["CH222"]
+    rows_by_iban = {row["transaction"]["iban"]: row for row in job["payload"]["rows"]}
+    assert rows_by_iban["CH111"]["status"] == "duplicate"
+    assert rows_by_iban["CH111"]["duplicate"] is True
+    assert rows_by_iban["CH222"]["status"] == "missing_mapping"
+    assert gateway.existing_calls == [("plan-1", "checking-id", date(2026, 4, 10))]
+
+
+def test_upload_preview_marks_legacy_split_import_id_as_duplicate(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+    client, store, gateway = app_client
+    login(client)
+    store.save_selected_plan("plan-1", "Household")
+    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    uetr = "7f590b14-505f-4e16-8701-3fa01ee7a5a1"
+    gateway.existing[("plan-1", "checking-id")] = {
+        make_import_id(
+            iban="CH111",
+            source_ref=uetr,
+            booking_date=date(2026, 4, 30),
+            amount=Decimal("-600"),
+            payee="Alex Example",
+            memo=None,
+        )
+    }
+    entry = f"""
+<Ntry>
+  <Amt Ccy="CHF">601.00</Amt>
+  <CdtDbtInd>DBIT</CdtDbtInd>
+  <RvslInd>false</RvslInd>
+  <Sts><Cd>BOOK</Cd></Sts>
+  <BookgDt><Dt>2026-04-30</Dt></BookgDt>
+  <ValDt><Dt>2026-04-30</Dt></ValDt>
+  <AcctSvcrRef>ENTRYREF</AcctSvcrRef>
+  <NtryDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">1.00</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RltdPties><Cdtr><Pty><Nm>Other SA</Nm></Pty></Cdtr></RltdPties>
+    </TxDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">600.00</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <Refs><UETR>{uetr}</UETR></Refs>
+      <RltdPties><Cdtr><Pty><Nm>Alex Example</Nm></Pty></Cdtr><CdtrAcct><Id><IBAN>CH0000000000000000005</IBAN></Id></CdtrAcct></RltdPties>
+    </TxDtls>
+  </NtryDtls>
+  <AddtlNtryInf>Ordre permanent</AddtlNtryInf>
+</Ntry>
+"""
+    content = camt_document(statement_xml("CH111", entry, opening="1000.00", closing="399.00"))
+
+    upload = client.post("/uploads", files={"file": ("legacy.xml", content, "application/xml")}, follow_redirects=False)
+
+    assert upload.status_code == 303
+    job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
+    assert job is not None
+    rows_by_import_id = {row["transaction"]["import_id"]: row for row in job["payload"]["rows"]}
+    assert rows_by_import_id["INAB:ENTRYREF.2"]["status"] == "duplicate"
+
+
+def test_upload_preview_applies_rules_even_when_other_ibans_are_unmapped(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+    client, store, _ = app_client
+    login(client)
+    store.save_selected_plan("plan-1", "Household")
+    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.create_rule(
+        name="Mapped cleanup",
+        enabled=True,
+        operator="contains",
+        pattern="mapped",
+        replacement_payee="Mapped Payee",
+        category_id="cat-food",
+        category_name="Everyday: Food",
+    )
+    content = camt_document(
+        statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Mapped raw"), opening="100.00", closing="90.00")
+        + statement_xml("CH222", entry_xml("20.00", "DBIT", "REF2", "Unmapped"), opening="100.00", closing="80.00")
+    )
+
+    upload = client.post("/uploads", files={"file": ("mixed.xml", content, "application/xml")}, follow_redirects=False)
+
+    assert upload.status_code == 303
+    job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
+    assert job is not None
+    assert job["status"] == "blocked"
+    rows_by_iban = {row["transaction"]["iban"]: row for row in job["payload"]["rows"]}
+    mapped = rows_by_iban["CH111"]["transaction"]
+    assert mapped["payee"] == "Mapped Payee"
+    assert mapped["original_payee"] == "Mapped raw"
+    assert mapped["category_id"] == "cat-food"
+    assert mapped["applied_rule_name"] == "Mapped cleanup"
 
 
 def test_setup_hides_mapped_and_dismissed_account_suggestions(app_client: tuple[TestClient, Store, FakeGateway]) -> None:

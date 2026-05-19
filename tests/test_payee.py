@@ -13,7 +13,15 @@ def test_payee_from_twint_purchase_description() -> None:
 def test_payee_from_card_purchase_description() -> None:
     assert (
         payee_from_description("Achat Coop-1959 Oron-la- 30.03.2026, 14:45, No carte Visa Debit 400000xxxxxx0002")
-        == "Coop-1959 Oron-la"
+        == "Coop"
+    )
+    assert (
+        payee_from_description("Achat Coop-12632 Parking C 30.04.2026, 14:10, No carte Visa Debit 400000xxxxxx0002")
+        == "Coop Parking"
+    )
+    assert (
+        payee_from_description("Achat Migros Parking Lausanne 30.04.2026, 14:10, No carte Visa Debit 400000xxxxxx0002")
+        == "Migros Parking"
     )
     assert (
         payee_from_description("Achat Example Clinic 30.04.2026, 14:10, No carte V PAY 00000000")
@@ -24,11 +32,11 @@ def test_payee_from_card_purchase_description() -> None:
 def test_payee_from_online_purchase_description() -> None:
     assert (
         payee_from_description("Achat online Example Relay 30.04.2026, 01:32, No carte Visa Debit 400000xxxxxx0002")
-        == "Relay for redd"
+        == "Example Relay"
     )
     assert (
         payee_from_description("Achat online Example Subscription 30.04.2026, 01:32, No carte Visa Debit 400000xxxxxx0002")
-        == "ChatGPT"
+        == "Example Subscription"
     )
     assert (
         payee_from_description(
@@ -39,6 +47,10 @@ def test_payee_from_online_purchase_description() -> None:
     assert (
         payee_from_description("Achat online SERVICE NAVIGO 4042878 25.04.2026, 17:50, No carte Visa Debit 400000xxxxxx0002")
         == "Service Navigo"
+    )
+    assert (
+        payee_from_description("Achat online SBB CFF FFS Mobile T 06.02.2026, 17:23, No carte Visa Debit 400000xxxxxx0002")
+        == "SBB Mobile"
     )
 
 

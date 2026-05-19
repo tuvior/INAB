@@ -6,13 +6,14 @@ from pathlib import Path
 import pytest
 
 from inab.camt import CamtParseError, UnsupportedFormatError, parse_camt, parse_csv_export, parse_upload
+from inab.models import make_import_id
 
 from conftest import camt_document, entry_xml, statement_xml
 
 
 def test_sample_camt_parses_and_reconciles() -> None:
     samples = sorted(Path("sample").glob("camt*.xml"))
-    sample = samples[0] if samples else Path("sample/camt053_001_08_ch0000000000000000000_20260519071007.xml")
+    sample = max(samples, key=lambda path: (path.stat().st_mtime, path.stat().st_size)) if samples else Path("sample/camt053_001_08_ch0000000000000000000_20260519071007.xml")
     if not sample.exists():
         pytest.skip("Local sample export is not present.")
 
@@ -24,6 +25,7 @@ def test_sample_camt_parses_and_reconciles() -> None:
     assert all(statement.balances_reconcile is not False for statement in result.statements)
     by_account_import_ids = {(tx.iban, tx.import_id) for tx in result.transactions}
     assert len(by_account_import_ids) == len(result.transactions)
+    assert all("\n" not in tx.memo for tx in result.transactions if tx.memo)
 
 
 def test_multi_account_camt_groups_by_statement() -> None:
@@ -143,8 +145,8 @@ def test_single_generic_entry_uses_detail_counterparty_and_memo() -> None:
     assert tx.import_id == "INAB:ENTRYREF"
     assert tx.memo and "Ordre permanent" in tx.memo
     assert "Loyer mai 2026" in tx.memo
-    assert "Counterparty IBAN: CH0000000000000000001" in tx.memo
-    assert "Counterparty bank: Example Bank AG" in tx.memo
+    assert "IBAN: CH0000000000000000001" in tx.memo
+    assert "Bank: Example Bank AG" in tx.memo
     assert tx.counterparty_name == "Regie Example SA"
     assert tx.counterparty_iban == "CH0000000000000000001"
     assert tx.counterparty_bank == "Example Bank AG"
@@ -189,7 +191,121 @@ def test_grouped_payment_splits_reconciled_transaction_details() -> None:
     assert [tx.amount for tx in result.transactions] == [Decimal("-19.55"), Decimal("-19.55")]
     assert [tx.payee for tx in result.transactions] == ["Insurance Example SA", "Insurance Example SA"]
     assert [tx.import_id for tx in result.transactions] == [
-        "INAB:DETAILREFONE",
-        "INAB:DETAILREFTWO",
+        "INAB:BATCHREF.1",
+        "INAB:BATCHREF.2",
     ]
-    assert all("Counterparty IBAN: CH0000000000000000002" in (tx.memo or "") for tx in result.transactions)
+    assert all("IBAN: CH0000000000000000002" in (tx.memo or "") for tx in result.transactions)
+
+
+def test_recurring_structured_references_do_not_duplicate_split_import_ids() -> None:
+    def entry(entry_ref: str, booking_date: str) -> str:
+        return f"""
+<Ntry>
+  <Amt Ccy="CHF">30.90</Amt>
+  <CdtDbtInd>DBIT</CdtDbtInd>
+  <RvslInd>false</RvslInd>
+  <Sts><Cd>BOOK</Cd></Sts>
+  <BookgDt><Dt>{booking_date}</Dt></BookgDt>
+  <ValDt><Dt>{booking_date}</Dt></ValDt>
+  <AcctSvcrRef>{entry_ref}</AcctSvcrRef>
+  <NtryDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">29.90</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RltdPties><Cdtr><Pty><Nm>Telecom Example SA</Nm></Pty></Cdtr><CdtrAcct><Id><IBAN>CH0000000000000000003</IBAN></Id></CdtrAcct></RltdPties>
+      <RmtInf><Strd><CdtrRefInf><Ref>RECURRINGREF</Ref></CdtrRefInf></Strd></RmtInf>
+    </TxDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">1.00</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RltdPties><Cdtr><Pty><Nm>Other SA</Nm></Pty></Cdtr><CdtrAcct><Id><IBAN>CH0000000000000000001</IBAN></Id></CdtrAcct></RltdPties>
+      <RmtInf><Strd><CdtrRefInf><Ref>OTHER-{entry_ref}</Ref></CdtrRefInf></Strd></RmtInf>
+    </TxDtls>
+  </NtryDtls>
+  <AddtlNtryInf>Paiement groupé</AddtlNtryInf>
+</Ntry>
+"""
+
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry("ENTRYREF1", "2026-04-28") + entry("ENTRYREF2", "2026-05-28"),
+            opening="100.00",
+            closing="38.20",
+        )
+    )
+
+    result = parse_camt(content)
+
+    telecom_transactions = [tx for tx in result.transactions if tx.payee == "Telecom Example SA"]
+    assert [tx.source_ref for tx in telecom_transactions] == ["ENTRYREF1.1", "ENTRYREF2.1"]
+    assert [tx.import_id for tx in telecom_transactions] == ["INAB:ENTRYREF1.1", "INAB:ENTRYREF2.1"]
+    assert all("Ref: RECURRINGREF" in (tx.memo or "") for tx in telecom_transactions)
+
+
+def test_split_detail_keeps_legacy_unique_detail_import_id_alias() -> None:
+    uetr = "7f590b14-505f-4e16-8701-3fa01ee7a5a1"
+    entry = f"""
+<Ntry>
+  <Amt Ccy="CHF">601.00</Amt>
+  <CdtDbtInd>DBIT</CdtDbtInd>
+  <RvslInd>false</RvslInd>
+  <Sts><Cd>BOOK</Cd></Sts>
+  <BookgDt><Dt>2026-04-30</Dt></BookgDt>
+  <ValDt><Dt>2026-04-30</Dt></ValDt>
+  <AcctSvcrRef>ENTRYREF</AcctSvcrRef>
+  <NtryDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">1.00</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RltdPties><Cdtr><Pty><Nm>Other SA</Nm></Pty></Cdtr></RltdPties>
+    </TxDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">600.00</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <Refs><UETR>{uetr}</UETR></Refs>
+      <RltdPties><Cdtr><Pty><Nm>Alex Example</Nm></Pty></Cdtr><CdtrAcct><Id><IBAN>CH0000000000000000005</IBAN></Id></CdtrAcct></RltdPties>
+    </TxDtls>
+  </NtryDtls>
+  <AddtlNtryInf>Ordre permanent</AddtlNtryInf>
+</Ntry>
+"""
+    content = camt_document(statement_xml("CH111", entry, opening="1000.00", closing="399.00"))
+
+    result = parse_camt(content)
+    tx = result.transactions[1]
+
+    assert tx.source_ref == "ENTRYREF.2"
+    assert tx.import_id == "INAB:ENTRYREF.2"
+    assert tx.legacy_import_ids == [
+        make_import_id(
+            iban="CH111",
+            source_ref=uetr,
+            booking_date=tx.booking_date,
+            amount=tx.amount,
+            payee=tx.payee,
+            memo=tx.memo,
+        )
+    ]
+
+
+def test_card_purchase_memo_is_compact_and_single_line() -> None:
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry_xml(
+                "10.00",
+                "DBIT",
+                "REF1",
+                "Achat Coop-1959 Oron-la-\n30.03.2026, 14:45, No carte Visa Debit 400000xxxxxx0002",
+            ),
+            opening="100.00",
+            closing="90.00",
+        )
+    )
+
+    result = parse_camt(content)
+    tx = result.transactions[0]
+
+    assert tx.payee == "Coop"
+    assert tx.memo == "Card: 30.03.2026 14:45"

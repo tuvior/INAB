@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -16,6 +17,7 @@ from .models import (
     BankTransaction,
     ParseResult,
     clean_source_ref,
+    compact_whitespace,
     make_import_id,
     normalize_whitespace,
     payee_from_description,
@@ -214,6 +216,7 @@ def _parse_statement(element: ElementTree.Element, statement_index: int, *, targ
         counterparty_name = item["counterparty_name"]
         counterparty_iban = item["counterparty_iban"]
         counterparty_bank = item["counterparty_bank"]
+        legacy_source_refs = item.get("legacy_source_refs") or []
         assert isinstance(source_ref, str | None)
         assert isinstance(amount, Decimal)
         assert isinstance(booking_date, date)
@@ -222,6 +225,7 @@ def _parse_statement(element: ElementTree.Element, statement_index: int, *, targ
         assert isinstance(counterparty_name, str | None)
         assert isinstance(counterparty_iban, str | None)
         assert isinstance(counterparty_bank, str | None)
+        assert isinstance(legacy_source_refs, list)
         key = (iban, booking_date.isoformat(), str(amount), payee, memo or "")
         occurrence_by_key[key] += 1
         import_id = make_import_id(
@@ -233,6 +237,19 @@ def _parse_statement(element: ElementTree.Element, statement_index: int, *, targ
             memo=memo,
             occurrence=occurrence_by_key[key],
         )
+        legacy_import_ids = [
+            make_import_id(
+                iban=iban,
+                source_ref=legacy_source_ref,
+                booking_date=booking_date,
+                amount=amount,
+                payee=payee,
+                memo=memo,
+                occurrence=occurrence_by_key[key],
+            )
+            for legacy_source_ref in legacy_source_refs
+            if isinstance(legacy_source_ref, str)
+        ]
         transactions.append(
             BankTransaction(
                 uid=f"{statement_id}:{item['sequence']}",
@@ -251,6 +268,7 @@ def _parse_statement(element: ElementTree.Element, statement_index: int, *, targ
                 counterparty_name=counterparty_name,
                 counterparty_iban=counterparty_iban,
                 counterparty_bank=counterparty_bank,
+                legacy_import_ids=legacy_import_ids,
             )
         )
 
@@ -323,7 +341,7 @@ def _parse_entry_items(
         return split_items
 
     payee = payee_from_description(description)
-    memo = truncate(description, 500)
+    memo = _entry_memo(description)
     counterparty = {"name": None, "iban": None, "bank": None}
     if details:
         detail = details[0]
@@ -392,6 +410,7 @@ def _split_detail_items(
     for detail_index, (detail, amount) in enumerate(parsed_details, start=1):
         counterparty = _counterparty_info(detail, amount)
         source_ref = _detail_source_ref(detail, entry_source_ref=entry_source_ref, detail_index=detail_index)
+        legacy_source_refs = _legacy_detail_source_refs(detail, current_source_ref=source_ref)
         items.append(
             {
                 "sequence": sequence * 1000 + detail_index,
@@ -403,6 +422,7 @@ def _split_detail_items(
                 "payee": (counterparty["name"] or payee_from_description(entry_description))[:200],
                 "memo": _detail_memo(entry_description, detail, amount),
                 "source_ref": source_ref,
+                "legacy_source_refs": legacy_source_refs,
                 "bank_code": bank_code,
                 "counterparty_name": counterparty["name"],
                 "counterparty_iban": counterparty["iban"],
@@ -506,7 +526,7 @@ def _csv_memo(row: dict[str, str | None]) -> str | None:
         value = normalize_whitespace(row.get(column))
         if value:
             parts.append(f"{label}: {value}")
-    return truncate("\n".join(parts), 500)
+    return _memo_from_parts(parts)
 
 
 def _first_balance(balances: Iterable[Balance], kind: str) -> Balance | None:
@@ -567,40 +587,102 @@ def _counterparty_info(detail: ElementTree.Element, signed_amount: Decimal) -> d
 
 
 def _detail_source_ref(detail: ElementTree.Element, *, entry_source_ref: str | None, detail_index: int) -> str | None:
+    if entry_source_ref:
+        return f"{entry_source_ref}.{detail_index}"
     for path in (
-        "RmtInf/Strd/CdtrRefInf/Ref",
-        "Refs/InstrId",
+        "Refs/AcctSvcrRef",
+        "Refs/TxId",
         "Refs/UETR",
+        "Refs/InstrId",
         "Refs/EndToEndId",
     ):
         value = clean_source_ref(_text(detail, path))
         if value:
             return value
-    if entry_source_ref:
-        return f"{entry_source_ref}:{detail_index}"
     return None
+
+
+def _legacy_detail_source_refs(detail: ElementTree.Element, *, current_source_ref: str | None) -> list[str]:
+    refs: list[str] = []
+    for path in (
+        "Refs/InstrId",
+        "Refs/UETR",
+        "Refs/EndToEndId",
+    ):
+        value = clean_source_ref(_text(detail, path))
+        if value and value != current_source_ref and value not in refs:
+            refs.append(value)
+    return refs
 
 
 def _detail_memo(base_description: str, detail: ElementTree.Element, signed_amount: Decimal) -> str | None:
     parts: list[str] = []
-    if base_description:
-        parts.append(base_description)
+    counterparty = _counterparty_info(detail, signed_amount)
+    if _should_include_base_description(base_description, counterparty["name"]):
+        parts.append(_entry_memo(base_description) or base_description)
     for element in detail.findall("RmtInf/Ustrd"):
         if element.text:
             parts.append(element.text)
     structured_ref = _text(detail, "RmtInf/Strd/CdtrRefInf/Ref")
     if structured_ref:
-        parts.append(f"Reference: {structured_ref}")
+        parts.append(f"Ref: {structured_ref}")
     end_to_end = clean_source_ref(_text(detail, "Refs/EndToEndId"))
     if end_to_end:
-        parts.append(f"End-to-end: {end_to_end}")
+        parts.append(f"E2E: {end_to_end}")
     counterparty_iban = _text(detail, "RltdPties/CdtrAcct/Id/IBAN") if signed_amount < 0 else _text(detail, "RltdPties/DbtrAcct/Id/IBAN")
     if counterparty_iban:
-        parts.append(f"Counterparty IBAN: {counterparty_iban}")
-    counterparty_bank = _counterparty_info(detail, signed_amount)["bank"]
+        parts.append(f"IBAN: {_iban_text(counterparty_iban) or counterparty_iban}")
+    counterparty_bank = counterparty["bank"]
     if counterparty_bank:
-        parts.append(f"Counterparty bank: {counterparty_bank}")
-    return truncate("\n".join(parts), 500)
+        parts.append(f"Bank: {counterparty_bank}")
+    return _memo_from_parts(parts)
+
+
+def _entry_memo(description: str) -> str | None:
+    card_memo = _card_purchase_memo(description)
+    if card_memo:
+        return truncate(card_memo, 500)
+    return truncate(description, 500)
+
+
+def _card_purchase_memo(description: str) -> str | None:
+    match = re.fullmatch(
+        r"(?P<merchant>.+?)\s+(?P<date>\d{2}\.\d{2}\.\d{4}),\s*(?P<time>\d{2}:\d{2}),\s*No carte\b.*",
+        normalize_whitespace(description),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return f"Card: {match.group('date')} {match.group('time')}"
+
+
+def _memo_from_parts(parts: list[str | None]) -> str | None:
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        value = compact_whitespace(part)
+        if not value:
+            continue
+        key = value.casefold()
+        if key in seen:
+            continue
+        cleaned.append(value)
+        seen.add(key)
+    return truncate("; ".join(cleaned), 500)
+
+
+def _should_include_base_description(base_description: str, counterparty_name: str | None) -> bool:
+    if not base_description:
+        return False
+    if _is_generic_description(base_description):
+        return True
+    if not counterparty_name:
+        return True
+    base = compact_whitespace(base_description).casefold()
+    counterparty = compact_whitespace(counterparty_name).casefold()
+    if not counterparty:
+        return True
+    return counterparty not in base and payee_from_description(base_description).casefold() != counterparty
 
 
 def _is_generic_description(description: str) -> bool:

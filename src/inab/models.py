@@ -10,13 +10,11 @@ from typing import Any
 
 REF_MISSING_VALUES = {"", "NONREF", "NOTPROVIDED", "NOT PROVIDED", "N/A", "NA"}
 GENERIC_PAYEES = {"paiement groupé", "paiement groupe", "ordre permanent"}
-KNOWN_PAYEES = {
+EXACT_PAYEE_ALIASES = {
     "ALIEXPRESS": "AliExpress",
     "BKG BOOKING.COM HOTEL": "Booking.com",
     "BOOKING.COM HOTEL": "Booking.com",
     "DIGITEC GALAXUS": "Digitec Galaxus",
-    "GOOGLE CHATGPT": "ChatGPT",
-    "GOOGLE RELAY FOR REDD": "Relay for reddit",
     "JUSTEAT": "Just Eat",
     "PARKINGPAY": "ParkingPay",
     "PLAYSTATION": "PlayStation",
@@ -27,7 +25,27 @@ KNOWN_PAYEES = {
     "SPOTIFY": "Spotify",
     "SPOTIFYCH": "Spotify",
 }
-UPPERCASE_WORDS = {"AG", "AI", "SA", "SBB", "V", "VISA"}
+PATTERN_PAYEE_ALIASES = (
+    (r"^COOP\b.*\bPARK", "Coop Parking"),
+    (r"^MIGROS\b.*\bPARK", "Migros Parking"),
+    (r"^COOP-\d+\b", "Coop"),
+    (r"^COOP PRONTO \d+\b", "Coop Pronto"),
+    (r"^MIGROS(?:\b|-)", "Migros"),
+    (r"^JUMBO-\d+\b", "Jumbo"),
+)
+PREFIX_PAYEE_ALIASES = (
+    ("SPOTIFY ", "Spotify"),
+    ("SERVICE NAVIGO ", "Service Navigo"),
+    ("BKG BOOKING.COM ", "Booking.com"),
+    ("BOOKING.COM ", "Booking.com"),
+    ("SBB CFF FFS MOBILE", "SBB Mobile"),
+    ("IKEA SA ", "IKEA"),
+    ("DECATHLON SPORTS ", "Decathlon"),
+    ("DENNER DISCOUNT ", "Denner"),
+    ("MCDONALDS ", "McDonald's"),
+    ("TCS ", "TCS"),
+)
+UPPERCASE_WORDS = {"AG", "AI", "B.V.", "GMBH", "SA", "SBB", "V", "VISA"}
 LOWERCASE_WORDS = {"de", "des", "du", "for", "la", "le", "of", "the"}
 
 
@@ -36,6 +54,10 @@ def normalize_whitespace(value: str | None) -> str:
         return ""
     lines = [" ".join(line.split()) for line in value.replace("\r\n", "\n").split("\n")]
     return "\n".join(line for line in lines if line).strip()
+
+
+def compact_whitespace(value: str | None) -> str:
+    return " ".join(normalize_whitespace(value).split())
 
 
 def first_line(value: str, fallback: str = "Unknown payee") -> str:
@@ -97,6 +119,8 @@ def _strip_noise_tokens(value: str) -> str:
     value = re.sub(r"\s*\*+\s*", " ", value)
     value = re.sub(r"-TWINT$", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+P[0-9A-Z]{6,}$", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bS\s+A\b", "SA", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bB\s*\.?\s*V\.?\b", "B.V.", value, flags=re.IGNORECASE)
     return value.strip(" -,.")
 
 
@@ -111,19 +135,26 @@ def _normalize_person_name(value: str) -> str:
 def _canonical_payee(value: str) -> str:
     collapsed = re.sub(r"\s+", " ", value).strip()
     lookup = collapsed.upper()
-    if lookup in KNOWN_PAYEES:
-        return KNOWN_PAYEES[lookup]
-    for prefix, canonical in (
-        ("SPOTIFY ", "Spotify"),
-        ("SERVICE NAVIGO ", "Service Navigo"),
-        ("BKG BOOKING.COM ", "Booking.com"),
-        ("BOOKING.COM ", "Booking.com"),
-    ):
-        if lookup.startswith(prefix):
-            return canonical
+    alias = _payee_alias(lookup)
+    if alias:
+        return alias
     if _should_smart_title(collapsed):
         return _smart_title(collapsed)
     return collapsed
+
+
+def _payee_alias(lookup: str) -> str | None:
+    if lookup in EXACT_PAYEE_ALIASES:
+        return EXACT_PAYEE_ALIASES[lookup]
+    if lookup == "TOURING CLUB SUISSE (TCS)":
+        return "TCS"
+    for pattern, canonical in PATTERN_PAYEE_ALIASES:
+        if re.match(pattern, lookup):
+            return canonical
+    for prefix, canonical in PREFIX_PAYEE_ALIASES:
+        if lookup.startswith(prefix):
+            return canonical
+    return None
 
 
 def _should_smart_title(value: str) -> bool:
@@ -145,8 +176,8 @@ def _smart_title(value: str) -> str:
             continue
         upper = token.upper()
         lower = token.lower()
-        if upper in KNOWN_PAYEES:
-            rendered.append(KNOWN_PAYEES[upper])
+        if upper in EXACT_PAYEE_ALIASES:
+            rendered.append(EXACT_PAYEE_ALIASES[upper])
         elif lower in LOWERCASE_WORDS and word_index > 0:
             rendered.append(lower)
         elif upper in UPPERCASE_WORDS or (len(token) <= 3 and token.isalpha() and token.isupper() and lower not in LOWERCASE_WORDS):
@@ -160,7 +191,7 @@ def _smart_title(value: str) -> str:
 def truncate(value: str | None, limit: int) -> str | None:
     if not value:
         return None
-    normalized = normalize_whitespace(value)
+    normalized = compact_whitespace(value)
     if len(normalized) <= limit:
         return normalized
     return normalized[: limit - 1].rstrip() + "..."
@@ -265,6 +296,7 @@ class BankTransaction:
     applied_rule_id: str | None = None
     applied_rule_name: str | None = None
     original_payee: str | None = None
+    legacy_import_ids: list[str] = field(default_factory=list)
 
     @property
     def milliunits(self) -> int:
@@ -315,6 +347,7 @@ class BankTransaction:
             "applied_rule_id": self.applied_rule_id,
             "applied_rule_name": self.applied_rule_name,
             "original_payee": self.original_payee,
+            "legacy_import_ids": self.legacy_import_ids,
             "milliunits": self.milliunits,
         }
 
@@ -342,6 +375,7 @@ class BankTransaction:
             applied_rule_id=data.get("applied_rule_id"),
             applied_rule_name=data.get("applied_rule_name"),
             original_payee=data.get("original_payee"),
+            legacy_import_ids=list(data.get("legacy_import_ids") or []),
         )
 
 

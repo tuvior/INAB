@@ -61,7 +61,7 @@ class YnabGateway(Protocol):
     def list_payees(self, plan_id: str) -> list[YnabPayee]:
         ...
 
-    def existing_import_ids(self, plan_id: str, account_id: str, since_date: date) -> set[str]:
+    def existing_import_ids(self, plan_id: str, account_id: str, since_date: date | None = None) -> set[str]:
         ...
 
     def create_transactions(self, plan_id: str, transactions: list[dict[str, Any]]) -> CreateTransactionsResult:
@@ -144,14 +144,17 @@ class OfficialYnabGateway:
             for payee in response.data.payees
         ]
 
-    def existing_import_ids(self, plan_id: str, account_id: str, since_date: date) -> set[str]:
+    def existing_import_ids(self, plan_id: str, account_id: str, since_date: date | None = None) -> set[str]:
         ynab = _ynab()
+        kwargs: dict[str, Any] = {}
+        if since_date is not None:
+            kwargs["since_date"] = since_date
         try:
             with ynab.ApiClient(ynab.Configuration(access_token=self.access_token)) as api_client:
                 response = ynab.TransactionsApi(api_client).get_transactions_by_account(
                     plan_id,
                     account_id,
-                    since_date=since_date,
+                    **kwargs,
                 )
         except Exception as exc:
             raise YnabError(_safe_error("Could not fetch existing YNAB transactions", exc)) from exc

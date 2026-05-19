@@ -114,6 +114,7 @@ class FakeGateway:
             YnabPayee(id="payee-deleted", name="Deleted Payee", transfer_account_id=None, deleted=True),
         ]
         self.existing: dict[tuple[str, str], set[str]] = {}
+        self.existing_calls: list[tuple[str, str, date | None]] = []
         self.created: list[dict[str, Any]] = []
 
     def list_plans(self) -> list[YnabPlan]:
@@ -128,7 +129,8 @@ class FakeGateway:
     def list_payees(self, plan_id: str) -> list[YnabPayee]:
         return self.payees
 
-    def existing_import_ids(self, plan_id: str, account_id: str, since_date: date) -> set[str]:
+    def existing_import_ids(self, plan_id: str, account_id: str, since_date: date | None = None) -> set[str]:
+        self.existing_calls.append((plan_id, account_id, since_date))
         return self.existing.get((plan_id, account_id), set())
 
     def create_transactions(self, plan_id: str, transactions: list[dict[str, Any]]) -> CreateTransactionsResult:

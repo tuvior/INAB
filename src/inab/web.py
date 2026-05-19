@@ -216,6 +216,8 @@ def create_app(
                 "transfers": [],
                 "parse_result": None,
                 "account_overrides": {},
+                "ignored_ibans": [],
+                "ignored_transaction_count": 0,
             }
             job_id = store.create_job(filename=filename, status="blocked", plan_id=store.selected_plan()[0], payload=payload)
             return _redirect(request, f"/imports/{job_id}")
@@ -236,6 +238,8 @@ def create_app(
                 "transfers": [],
                 "parse_result": None,
                 "account_overrides": {},
+                "ignored_ibans": [],
+                "ignored_transaction_count": 0,
             }
             job_id = store.create_job(filename=filename, status="blocked", plan_id=store.selected_plan()[0], payload=payload)
             return _redirect(request, f"/imports/{job_id}")
@@ -273,6 +277,53 @@ def create_app(
         if not job:
             raise HTTPException(status_code=404, detail="Import job not found.")
         return _render(request, "preview.html", {"job": job})
+
+    @app.post("/imports/{job_id}/ignored-ibans", dependencies=[Depends(_require_auth)])
+    async def ignore_import_ibans(request: Request, job_id: str) -> Any:
+        job = store.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Import job not found.")
+        payload = job["payload"]
+        if not payload.get("parse_result"):
+            return _redirect(request, f"/imports/{job_id}")
+
+        form = await request.form()
+        missing_ibans = {_normalize_iban(iban) for iban in payload.get("missing_ibans", [])}
+        requested_ibans = {
+            _normalize_iban(str(iban))
+            for iban in form.getlist("ignored_ibans")
+            if _normalize_iban(str(iban)) in missing_ibans
+        }
+        if not requested_ibans:
+            return _redirect(request, f"/imports/{job_id}")
+
+        parsed = ParseResult.from_dict(payload["parse_result"])
+        filtered, ignored_ibans, ignored_transaction_count = _without_ignored_ibans(parsed, requested_ibans)
+        if not ignored_ibans:
+            return _redirect(request, f"/imports/{job_id}")
+
+        account_overrides = {
+            iban: _account_mapping_from_dict(mapping)
+            for iban, mapping in (payload.get("account_overrides") or {}).items()
+        }
+        plan_id = job.get("plan_id") or payload.get("selected_plan_id") or store.selected_plan()[0]
+        plan_name = payload.get("selected_plan_name") or store.selected_plan()[1]
+        combined_ignored_ibans = sorted(set(payload.get("ignored_ibans") or []) | ignored_ibans)
+        total_ignored_transactions = int(payload.get("ignored_transaction_count") or 0) + ignored_transaction_count
+        updated_payload, status = _build_preview_payload(
+            filtered,
+            store=store,
+            settings=settings,
+            gateway_factory=gateway_factory,
+            plan_id=plan_id,
+            plan_name=plan_name,
+            filename=payload.get("filename") or job["filename"],
+            account_overrides=account_overrides,
+            ignored_ibans=combined_ignored_ibans,
+            ignored_transaction_count=total_ignored_transactions,
+        )
+        store.update_job(job_id, status=status, payload=updated_payload)
+        return _redirect(request, f"/imports/{job_id}")
 
     @get_or_post_rules(app)
     async def rules(request: Request) -> Any:
@@ -662,6 +713,22 @@ def _mappings_with_overrides(store: Store, ibans: set[str], account_overrides: d
     return mappings
 
 
+def _without_ignored_ibans(parsed: ParseResult, ignored_ibans: set[str]) -> tuple[ParseResult, set[str], int]:
+    ignored_ibans = {_normalize_iban(iban) for iban in ignored_ibans if _normalize_iban(iban)}
+    if not ignored_ibans:
+        return parsed, set(), 0
+    statements = []
+    actual_ignored_ibans: set[str] = set()
+    ignored_transaction_count = 0
+    for statement in parsed.statements:
+        if _normalize_iban(statement.iban) in ignored_ibans:
+            actual_ignored_ibans.add(statement.iban)
+            ignored_transaction_count += len(statement.transactions)
+            continue
+        statements.append(statement)
+    return ParseResult(statements=statements, skipped_entries=parsed.skipped_entries), actual_ignored_ibans, ignored_transaction_count
+
+
 def _observe_counterparty_accounts(store: Store, parsed: ParseResult) -> None:
     for tx in parsed.transactions:
         if tx.counterparty_iban:
@@ -731,6 +798,8 @@ def _build_preview_payload(
     plan_name: str | None,
     filename: str,
     account_overrides: dict[str, AccountMapping] | None = None,
+    ignored_ibans: list[str] | None = None,
+    ignored_transaction_count: int = 0,
 ) -> tuple[dict[str, Any], str]:
     errors: list[str] = []
     if not plan_id:
@@ -745,7 +814,7 @@ def _build_preview_payload(
         errors.append("Every IBAN in the upload must be mapped before import.")
 
     duplicate_keys: set[tuple[str, str]] = set()
-    if not errors and plan_id:
+    if plan_id and settings.ynab_configured and mappings:
         try:
             duplicate_keys = _existing_duplicate_keys(parsed.transactions, mappings=mappings, gateway=gateway_factory(settings), plan_id=plan_id)
         except YnabError as exc:
@@ -822,6 +891,8 @@ def _build_preview_payload(
         "selected_plan_name": plan_name,
         "parse_result": parsed.to_dict(),
         "account_overrides": {iban: _account_mapping_to_dict(mapping) for iban, mapping in (account_overrides or {}).items()},
+        "ignored_ibans": sorted(ignored_ibans or []),
+        "ignored_transaction_count": ignored_transaction_count,
         "statements": statements,
         "rows": rows,
         "transfers": transfers,
@@ -868,7 +939,7 @@ def _existing_duplicate_keys(
         since_date = min(tx.booking_date for tx in account_transactions)
         existing = gateway.existing_import_ids(plan_id, account_id, since_date)
         for tx in account_transactions:
-            if tx.import_id in existing:
+            if tx.import_id in existing or any(import_id in existing for import_id in tx.legacy_import_ids):
                 duplicates.add((account_id, tx.import_id))
     return duplicates
 

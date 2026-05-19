@@ -28,14 +28,28 @@
 {% if job.payload.missing_ibans %}
   <section class="panel">
     <h2>Missing mappings</h2>
-    <p>Map these IBANs before importing:</p>
-    <ul>
-      {% for iban in job.payload.missing_ibans %}
-        <li>{{ iban }}</li>
-      {% endfor %}
-    </ul>
-    <a class="button secondary" href="{{ url_path_for('setup') }}">Open setup</a>
+    <p>Map these IBANs before importing, or ignore selected accounts for this import.</p>
+    <form class="form-stack" method="post" action="{{ url_path_for('ignore_import_ibans', job_id=job.id) }}">
+      <div class="transfer-list">
+        {% for iban in job.payload.missing_ibans %}
+          <label class="transfer-row">
+            <input type="checkbox" name="ignored_ibans" value="{{ iban }}">
+            <span>{{ iban }}</span>
+          </label>
+        {% endfor %}
+      </div>
+      <div class="form-actions split-actions">
+        <a class="button secondary" href="{{ url_path_for('setup') }}">Open setup</a>
+        <button class="secondary" type="submit">Ignore selected</button>
+      </div>
+    </form>
   </section>
+{% endif %}
+
+{% if job.payload.ignored_ibans %}
+  <div class="alert alert-ok">
+    Ignoring {{ job.payload.ignored_ibans|length }} IBAN{% if job.payload.ignored_ibans|length != 1 %}s{% endif %} and {{ job.payload.ignored_transaction_count }} transaction{% if job.payload.ignored_transaction_count != 1 %}s{% endif %} in this import.
+  </div>
 {% endif %}
 
 {% if job.payload.statements %}
