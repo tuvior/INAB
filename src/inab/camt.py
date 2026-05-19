@@ -51,6 +51,11 @@ CSV_REQUIRED_COLUMNS = {
     "Spaces",
 }
 
+CARD_PURCHASE_PATTERN = re.compile(
+    r"(?P<merchant>.+?)\s+(?P<date>\d{2}\.\d{2}\.\d{4}),\s*(?P<time>\d{2}:\d{2}),\s*No carte\b.*",
+    flags=re.IGNORECASE,
+)
+
 
 def parse_upload(
     filename: str,
@@ -207,6 +212,7 @@ def _parse_statement(element: ElementTree.Element, statement_index: int, *, targ
         pending.extend(_parse_entry_items(entry, statement_id=statement_id, iban=iban, currency=currency, sequence=sequence))
 
     occurrence_by_key: dict[tuple[str, str, str, str, str], int] = defaultdict(int)
+    bank_occurrence_by_key: dict[tuple[str, str, str, str, str], int] = defaultdict(int)
     for item in pending:
         source_ref = item["source_ref"]
         amount = item["amount"]
@@ -217,6 +223,9 @@ def _parse_statement(element: ElementTree.Element, statement_index: int, *, targ
         counterparty_iban = item["counterparty_iban"]
         counterparty_bank = item["counterparty_bank"]
         legacy_source_refs = item.get("legacy_source_refs") or []
+        legacy_exact_source_refs = item.get("legacy_exact_source_refs") or []
+        legacy_booking_dates = item.get("legacy_booking_dates") or []
+        bank_booking_date = item.get("bank_booking_date") or booking_date
         assert isinstance(source_ref, str | None)
         assert isinstance(amount, Decimal)
         assert isinstance(booking_date, date)
@@ -226,8 +235,13 @@ def _parse_statement(element: ElementTree.Element, statement_index: int, *, targ
         assert isinstance(counterparty_iban, str | None)
         assert isinstance(counterparty_bank, str | None)
         assert isinstance(legacy_source_refs, list)
+        assert isinstance(legacy_exact_source_refs, list)
+        assert isinstance(legacy_booking_dates, list)
+        assert isinstance(bank_booking_date, date)
         key = (iban, booking_date.isoformat(), str(amount), payee, memo or "")
         occurrence_by_key[key] += 1
+        bank_key = (iban, bank_booking_date.isoformat(), str(amount), payee, memo or "")
+        bank_occurrence_by_key[bank_key] += 1
         import_id = make_import_id(
             iban=iban,
             source_ref=source_ref,
@@ -250,6 +264,35 @@ def _parse_statement(element: ElementTree.Element, statement_index: int, *, targ
             for legacy_source_ref in legacy_source_refs
             if isinstance(legacy_source_ref, str)
         ]
+        if source_ref is None:
+            for legacy_booking_date in legacy_booking_dates:
+                if not isinstance(legacy_booking_date, date):
+                    continue
+                legacy_key = (iban, legacy_booking_date.isoformat(), str(amount), payee, memo or "")
+                legacy_import_id = make_import_id(
+                    iban=iban,
+                    source_ref=None,
+                    booking_date=legacy_booking_date,
+                    amount=amount,
+                    payee=payee,
+                    memo=memo,
+                    occurrence=bank_occurrence_by_key[legacy_key],
+                )
+                if legacy_import_id != import_id and legacy_import_id not in legacy_import_ids:
+                    legacy_import_ids.append(legacy_import_id)
+        legacy_exact_import_ids = [
+            make_import_id(
+                iban=iban,
+                source_ref=legacy_source_ref,
+                booking_date=booking_date,
+                amount=amount,
+                payee=payee,
+                memo=memo,
+                occurrence=occurrence_by_key[key],
+            )
+            for legacy_source_ref in legacy_exact_source_refs
+            if isinstance(legacy_source_ref, str)
+        ]
         transactions.append(
             BankTransaction(
                 uid=f"{statement_id}:{item['sequence']}",
@@ -269,6 +312,7 @@ def _parse_statement(element: ElementTree.Element, statement_index: int, *, targ
                 counterparty_iban=counterparty_iban,
                 counterparty_bank=counterparty_bank,
                 legacy_import_ids=legacy_import_ids,
+                legacy_exact_import_ids=legacy_exact_import_ids,
             )
         )
 
@@ -323,6 +367,7 @@ def _parse_entry_items(
     description = _entry_description(entry)
     details = entry.findall("./NtryDtls/TxDtls")
 
+    bank_value_date = _date_text(_text(entry, "ValDt/Dt") or _text(entry, "ValDt/DtTm"))
     split_items = _split_detail_items(
         details,
         statement_id=statement_id,
@@ -330,7 +375,7 @@ def _parse_entry_items(
         currency=currency,
         sequence=sequence,
         booking_date=booking_date,
-        value_date=_date_text(_text(entry, "ValDt/Dt") or _text(entry, "ValDt/DtTm")),
+        value_date=bank_value_date,
         entry_description=description,
         entry_source_ref=source_ref,
         bank_code=bank_code,
@@ -342,6 +387,8 @@ def _parse_entry_items(
 
     payee = payee_from_description(description)
     memo = _entry_memo(description)
+    transaction_date = _transaction_booking_date(booking_date, description)
+    legacy_booking_dates = [booking_date] if transaction_date != booking_date else []
     counterparty = {"name": None, "iban": None, "bank": None}
     if details:
         detail = details[0]
@@ -355,8 +402,9 @@ def _parse_entry_items(
             "sequence": sequence,
             "iban": iban,
             "currency": currency,
-            "booking_date": booking_date,
-            "value_date": _date_text(_text(entry, "ValDt/Dt") or _text(entry, "ValDt/DtTm")),
+            "booking_date": transaction_date,
+            "bank_booking_date": booking_date,
+            "value_date": bank_value_date,
             "amount": signed_amount,
             "payee": payee,
             "memo": memo,
@@ -365,6 +413,7 @@ def _parse_entry_items(
             "counterparty_name": counterparty["name"],
             "counterparty_iban": counterparty["iban"],
             "counterparty_bank": counterparty["bank"],
+            "legacy_booking_dates": legacy_booking_dates,
         }
     ]
 
@@ -411,6 +460,7 @@ def _split_detail_items(
         counterparty = _counterparty_info(detail, amount)
         source_ref = _detail_source_ref(detail, entry_source_ref=entry_source_ref, detail_index=detail_index)
         legacy_source_refs = _legacy_detail_source_refs(detail, current_source_ref=source_ref)
+        legacy_exact_source_refs = _legacy_exact_detail_source_refs(detail, current_source_ref=source_ref)
         items.append(
             {
                 "sequence": sequence * 1000 + detail_index,
@@ -423,6 +473,7 @@ def _split_detail_items(
                 "memo": _detail_memo(entry_description, detail, amount),
                 "source_ref": source_ref,
                 "legacy_source_refs": legacy_source_refs,
+                "legacy_exact_source_refs": legacy_exact_source_refs,
                 "bank_code": bank_code,
                 "counterparty_name": counterparty["name"],
                 "counterparty_iban": counterparty["iban"],
@@ -615,6 +666,13 @@ def _legacy_detail_source_refs(detail: ElementTree.Element, *, current_source_re
     return refs
 
 
+def _legacy_exact_detail_source_refs(detail: ElementTree.Element, *, current_source_ref: str | None) -> list[str]:
+    structured_ref = clean_source_ref(_text(detail, "RmtInf/Strd/CdtrRefInf/Ref"))
+    if structured_ref and structured_ref != current_source_ref:
+        return [structured_ref]
+    return []
+
+
 def _detail_memo(base_description: str, detail: ElementTree.Element, signed_amount: Decimal) -> str | None:
     parts: list[str] = []
     counterparty = _counterparty_info(detail, signed_amount)
@@ -646,14 +704,26 @@ def _entry_memo(description: str) -> str | None:
 
 
 def _card_purchase_memo(description: str) -> str | None:
-    match = re.fullmatch(
-        r"(?P<merchant>.+?)\s+(?P<date>\d{2}\.\d{2}\.\d{4}),\s*(?P<time>\d{2}:\d{2}),\s*No carte\b.*",
-        normalize_whitespace(description),
-        flags=re.IGNORECASE,
-    )
+    match = CARD_PURCHASE_PATTERN.fullmatch(normalize_whitespace(description))
     if not match:
         return None
     return f"Card: {match.group('date')} {match.group('time')}"
+
+
+def _transaction_booking_date(bank_booking_date: date, description: str) -> date:
+    payment_date = _card_payment_date(description)
+    return payment_date or bank_booking_date
+
+
+def _card_payment_date(description: str) -> date | None:
+    match = CARD_PURCHASE_PATTERN.fullmatch(normalize_whitespace(description))
+    if not match:
+        return None
+    day, month, year = match.group("date").split(".")
+    try:
+        return date(int(year), int(month), int(day))
+    except ValueError:
+        return None
 
 
 def _memo_from_parts(parts: list[str | None]) -> str | None:

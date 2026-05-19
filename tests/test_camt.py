@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -194,6 +195,10 @@ def test_grouped_payment_splits_reconciled_transaction_details() -> None:
         "INAB:BATCHREF.1",
         "INAB:BATCHREF.2",
     ]
+    assert [tx.legacy_exact_import_ids for tx in result.transactions] == [
+        ["INAB:DETAILREFONE"],
+        ["INAB:DETAILREFTWO"],
+    ]
     assert all("IBAN: CH0000000000000000002" in (tx.memo or "") for tx in result.transactions)
 
 
@@ -309,3 +314,65 @@ def test_card_purchase_memo_is_compact_and_single_line() -> None:
 
     assert tx.payee == "Coop"
     assert tx.memo == "Card: 30.03.2026 14:45"
+
+
+def test_card_purchase_uses_payment_date_as_transaction_date() -> None:
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry_xml(
+                "34.30",
+                "DBIT",
+                "19973057037",
+                "Achat Sample Bistro\n15.01.2026, 13:58, No carte Visa Debit 400000xxxxxx0002",
+                booking_date="2026-01-19",
+                value_date="2026-01-19",
+            ),
+            opening="100.00",
+            closing="65.70",
+        )
+    )
+
+    result = parse_camt(content)
+    tx = result.transactions[0]
+
+    assert tx.booking_date == date(2026, 1, 15)
+    assert tx.value_date == date(2026, 1, 19)
+    assert tx.to_ynab_payload(account_id="checking-id")["date"] == "2026-01-15"
+
+
+def test_card_purchase_keeps_legacy_bank_date_fallback_import_id() -> None:
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            """
+<Ntry>
+  <Amt Ccy="CHF">34.30</Amt>
+  <CdtDbtInd>DBIT</CdtDbtInd>
+  <RvslInd>false</RvslInd>
+  <Sts><Cd>BOOK</Cd></Sts>
+  <BookgDt><Dt>2026-01-19</Dt></BookgDt>
+  <ValDt><Dt>2026-01-19</Dt></ValDt>
+  <AddtlNtryInf>Achat Sample Bistro
+15.01.2026, 13:58, No carte Visa Debit 400000xxxxxx0002</AddtlNtryInf>
+</Ntry>
+""",
+            opening="100.00",
+            closing="65.70",
+        )
+    )
+
+    result = parse_camt(content)
+    tx = result.transactions[0]
+    old_import_id = make_import_id(
+        iban="CH111",
+        source_ref=None,
+        booking_date=date(2026, 1, 19),
+        amount=tx.amount,
+        payee=tx.payee,
+        memo=tx.memo,
+    )
+
+    assert tx.booking_date == date(2026, 1, 15)
+    assert tx.import_id != old_import_id
+    assert tx.legacy_import_ids == [old_import_id]

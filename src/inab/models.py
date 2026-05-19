@@ -297,6 +297,7 @@ class BankTransaction:
     applied_rule_name: str | None = None
     original_payee: str | None = None
     legacy_import_ids: list[str] = field(default_factory=list)
+    legacy_exact_import_ids: list[str] = field(default_factory=list)
 
     @property
     def milliunits(self) -> int:
@@ -348,6 +349,7 @@ class BankTransaction:
             "applied_rule_name": self.applied_rule_name,
             "original_payee": self.original_payee,
             "legacy_import_ids": self.legacy_import_ids,
+            "legacy_exact_import_ids": self.legacy_exact_import_ids,
             "milliunits": self.milliunits,
         }
 
@@ -376,6 +378,7 @@ class BankTransaction:
             applied_rule_name=data.get("applied_rule_name"),
             original_payee=data.get("original_payee"),
             legacy_import_ids=list(data.get("legacy_import_ids") or []),
+            legacy_exact_import_ids=list(data.get("legacy_exact_import_ids") or []),
         )
 
 

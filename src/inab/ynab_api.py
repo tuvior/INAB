@@ -48,6 +48,13 @@ class CreateTransactionsResult:
     duplicate_import_ids: list[str]
 
 
+@dataclass(frozen=True)
+class ExistingTransaction:
+    import_id: str
+    date: date | None
+    amount: int | None
+
+
 class YnabGateway(Protocol):
     def list_plans(self) -> list[YnabPlan]:
         ...
@@ -61,7 +68,7 @@ class YnabGateway(Protocol):
     def list_payees(self, plan_id: str) -> list[YnabPayee]:
         ...
 
-    def existing_import_ids(self, plan_id: str, account_id: str, since_date: date | None = None) -> set[str]:
+    def existing_transactions(self, plan_id: str, account_id: str, since_date: date | None = None) -> list[ExistingTransaction]:
         ...
 
     def create_transactions(self, plan_id: str, transactions: list[dict[str, Any]]) -> CreateTransactionsResult:
@@ -144,7 +151,7 @@ class OfficialYnabGateway:
             for payee in response.data.payees
         ]
 
-    def existing_import_ids(self, plan_id: str, account_id: str, since_date: date | None = None) -> set[str]:
+    def existing_transactions(self, plan_id: str, account_id: str, since_date: date | None = None) -> list[ExistingTransaction]:
         ynab = _ynab()
         kwargs: dict[str, Any] = {}
         if since_date is not None:
@@ -158,11 +165,15 @@ class OfficialYnabGateway:
                 )
         except Exception as exc:
             raise YnabError(_safe_error("Could not fetch existing YNAB transactions", exc)) from exc
-        return {
-            transaction.import_id
+        return [
+            ExistingTransaction(
+                import_id=str(transaction.import_id),
+                date=_transaction_date(getattr(transaction, "date", None)),
+                amount=_transaction_amount(getattr(transaction, "amount", None)),
+            )
             for transaction in response.data.transactions
             if getattr(transaction, "import_id", None)
-        }
+        ]
 
     def create_transactions(self, plan_id: str, transactions: list[dict[str, Any]]) -> CreateTransactionsResult:
         if not transactions:
@@ -193,6 +204,29 @@ def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _transaction_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    raw = str(value)
+    if not raw or raw == "None":
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+
+
+def _transaction_amount(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _safe_error(message: str, exc: Exception) -> str:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import secrets
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -937,11 +937,60 @@ def _existing_duplicate_keys(
     duplicates: set[tuple[str, str]] = set()
     for account_id, account_transactions in txs_by_account.items():
         since_date = min(tx.booking_date for tx in account_transactions)
-        existing = gateway.existing_import_ids(plan_id, account_id, since_date)
+        existing_transactions = gateway.existing_transactions(plan_id, account_id, since_date)
+        existing_by_import_id = {transaction.import_id: transaction for transaction in existing_transactions}
+        exact_alias_counts = Counter(alias for tx in account_transactions for alias in tx.legacy_exact_import_ids)
+        exact_alias_date_counts = Counter(
+            (alias, tx.booking_date)
+            for tx in account_transactions
+            for alias in tx.legacy_exact_import_ids
+        )
+        exact_alias_amount_counts = Counter(
+            (alias, tx.milliunits)
+            for tx in account_transactions
+            for alias in tx.legacy_exact_import_ids
+        )
         for tx in account_transactions:
-            if tx.import_id in existing or any(import_id in existing for import_id in tx.legacy_import_ids):
+            if tx.import_id in existing_by_import_id or any(import_id in existing_by_import_id for import_id in tx.legacy_import_ids):
+                duplicates.add((account_id, tx.import_id))
+                continue
+            if any(
+                _legacy_exact_match(
+                    existing_by_import_id.get(import_id),
+                    tx,
+                    import_id=import_id,
+                    exact_alias_counts=exact_alias_counts,
+                    exact_alias_date_counts=exact_alias_date_counts,
+                    exact_alias_amount_counts=exact_alias_amount_counts,
+                )
+                for import_id in tx.legacy_exact_import_ids
+            ):
                 duplicates.add((account_id, tx.import_id))
     return duplicates
+
+
+def _legacy_exact_match(
+    existing: Any,
+    tx: BankTransaction,
+    *,
+    import_id: str,
+    exact_alias_counts: Counter[str],
+    exact_alias_date_counts: Counter[tuple[str, date]],
+    exact_alias_amount_counts: Counter[tuple[str, int]],
+) -> bool:
+    if not existing:
+        return False
+    date_matches = existing.date == tx.booking_date if existing.date is not None else None
+    amount_matches = existing.amount == tx.milliunits if existing.amount is not None else None
+    if date_matches is False or amount_matches is False:
+        return False
+    if date_matches is True and amount_matches is True:
+        return True
+    if date_matches is True:
+        return exact_alias_date_counts[(import_id, tx.booking_date)] == 1
+    if amount_matches is True:
+        return exact_alias_amount_counts[(import_id, tx.milliunits)] == 1
+    return exact_alias_counts[import_id] == 1
 
 
 def _import_job(

@@ -12,7 +12,7 @@ from inab.config import Settings
 from inab.models import BankTransaction
 from inab.store import Store
 from inab.web import create_app
-from inab.ynab_api import CreateTransactionsResult, YnabAccount, YnabCategory, YnabPayee, YnabPlan
+from inab.ynab_api import CreateTransactionsResult, ExistingTransaction, YnabAccount, YnabCategory, YnabPayee, YnabPlan
 
 
 def camt_document(statements: str) -> bytes:
@@ -114,6 +114,7 @@ class FakeGateway:
             YnabPayee(id="payee-deleted", name="Deleted Payee", transfer_account_id=None, deleted=True),
         ]
         self.existing: dict[tuple[str, str], set[str]] = {}
+        self.existing_transactions_by_account: dict[tuple[str, str], list[ExistingTransaction]] = {}
         self.existing_calls: list[tuple[str, str, date | None]] = []
         self.created: list[dict[str, Any]] = []
 
@@ -129,9 +130,15 @@ class FakeGateway:
     def list_payees(self, plan_id: str) -> list[YnabPayee]:
         return self.payees
 
-    def existing_import_ids(self, plan_id: str, account_id: str, since_date: date | None = None) -> set[str]:
+    def existing_transactions(self, plan_id: str, account_id: str, since_date: date | None = None) -> list[ExistingTransaction]:
         self.existing_calls.append((plan_id, account_id, since_date))
-        return self.existing.get((plan_id, account_id), set())
+        key = (plan_id, account_id)
+        if key in self.existing_transactions_by_account:
+            return self.existing_transactions_by_account[key]
+        return [
+            ExistingTransaction(import_id=import_id, date=since_date or date(2000, 1, 1), amount=0)
+            for import_id in self.existing.get(key, set())
+        ]
 
     def create_transactions(self, plan_id: str, transactions: list[dict[str, Any]]) -> CreateTransactionsResult:
         self.created.extend(transactions)

@@ -23,7 +23,7 @@ class Settings:
         username = os.environ.get("INAB_USERNAME")
         password = os.environ.get("INAB_PASSWORD")
         session_secret = os.environ.get("INAB_SESSION_SECRET") or password or "inab-dev-session-secret"
-        max_upload_bytes = int(os.environ.get("INAB_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+        max_upload_bytes = int(os.environ.get("INAB_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
         return cls(
             data_dir=data_dir,
             ynab_access_token=os.environ.get("YNAB_ACCESS_TOKEN"),

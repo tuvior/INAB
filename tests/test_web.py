@@ -10,7 +10,7 @@ from inab.config import Settings
 from inab.models import make_import_id
 from inab.store import Store
 from inab.web import _save_plan, create_app, format_money
-from inab.ynab_api import YnabPlan
+from inab.ynab_api import ExistingTransaction, YnabPlan
 
 from conftest import FakeGateway, camt_document, entry_xml, login, statement_xml
 
@@ -228,6 +228,45 @@ def test_upload_preview_marks_existing_import_id_as_duplicate(app_client: tuple[
     assert gateway.existing_calls == [("plan-1", "checking-id", date(2026, 4, 10))]
 
 
+def test_upload_preview_marks_bank_date_card_fallback_import_id_as_duplicate(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+    client, store, gateway = app_client
+    login(client)
+    store.save_selected_plan("plan-1", "Household")
+    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    old_import_id = make_import_id(
+        iban="CH111",
+        source_ref=None,
+        booking_date=date(2026, 1, 19),
+        amount=Decimal("-34.30"),
+        payee="Sample Bistro",
+        memo="Card: 15.01.2026 13:58",
+    )
+    gateway.existing[("plan-1", "checking-id")] = {old_import_id}
+    entry = """
+<Ntry>
+  <Amt Ccy="CHF">34.30</Amt>
+  <CdtDbtInd>DBIT</CdtDbtInd>
+  <RvslInd>false</RvslInd>
+  <Sts><Cd>BOOK</Cd></Sts>
+  <BookgDt><Dt>2026-01-19</Dt></BookgDt>
+  <ValDt><Dt>2026-01-19</Dt></ValDt>
+  <AddtlNtryInf>Achat Sample Bistro
+15.01.2026, 13:58, No carte Visa Debit 400000xxxxxx0002</AddtlNtryInf>
+</Ntry>
+"""
+    content = camt_document(statement_xml("CH111", entry, opening="100.00", closing="65.70"))
+
+    upload = client.post("/uploads", files={"file": ("card.xml", content, "application/xml")}, follow_redirects=False)
+
+    assert upload.status_code == 303
+    job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
+    assert job is not None
+    row = job["payload"]["rows"][0]
+    assert row["transaction"]["booking_date"] == "2026-01-15"
+    assert row["status"] == "duplicate"
+    assert gateway.existing_calls == [("plan-1", "checking-id", date(2026, 1, 15))]
+
+
 def test_upload_preview_applies_rule_metadata_and_import_sends_category(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
     client, store, gateway = app_client
     login(client)
@@ -438,6 +477,168 @@ def test_upload_preview_marks_legacy_split_import_id_as_duplicate(app_client: tu
     assert job is not None
     rows_by_import_id = {row["transaction"]["import_id"]: row for row in job["payload"]["rows"]}
     assert rows_by_import_id["INAB:ENTRYREF.2"]["status"] == "duplicate"
+
+
+def test_upload_preview_matches_structured_reference_alias_only_with_same_date_and_amount(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
+    client, store, gateway = app_client
+    login(client)
+    store.save_selected_plan("plan-1", "Household")
+    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    gateway.existing_transactions_by_account[("plan-1", "checking-id")] = [
+        ExistingTransaction(
+            import_id="INAB:DETAILREFONE",
+            date=date(2026, 5, 8),
+            amount=-19550,
+        ),
+        ExistingTransaction(
+            import_id="INAB:DETAILREFTWO",
+            date=date(2026, 5, 7),
+            amount=-19550,
+        ),
+    ]
+    entry = """
+<Ntry>
+  <Amt Ccy="CHF">39.10</Amt>
+  <CdtDbtInd>DBIT</CdtDbtInd>
+  <RvslInd>false</RvslInd>
+  <Sts><Cd>BOOK</Cd></Sts>
+  <BookgDt><Dt>2026-05-08</Dt></BookgDt>
+  <ValDt><Dt>2026-05-08</Dt></ValDt>
+  <AcctSvcrRef>ENTRYREF</AcctSvcrRef>
+  <NtryDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">19.55</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RltdPties><Cdtr><Pty><Nm>Insurance Example SA</Nm></Pty></Cdtr></RltdPties>
+      <RmtInf><Strd><CdtrRefInf><Ref>DETAILREFONE</Ref></CdtrRefInf></Strd></RmtInf>
+    </TxDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">19.55</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RltdPties><Cdtr><Pty><Nm>Insurance Example SA</Nm></Pty></Cdtr></RltdPties>
+      <RmtInf><Strd><CdtrRefInf><Ref>DETAILREFTWO</Ref></CdtrRefInf></Strd></RmtInf>
+    </TxDtls>
+  </NtryDtls>
+  <AddtlNtryInf>Paiement groupé</AddtlNtryInf>
+</Ntry>
+"""
+    content = camt_document(statement_xml("CH111", entry, opening="100.00", closing="60.90"))
+
+    upload = client.post("/uploads", files={"file": ("structured.xml", content, "application/xml")}, follow_redirects=False)
+
+    assert upload.status_code == 303
+    job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
+    assert job is not None
+    rows_by_import_id = {row["transaction"]["import_id"]: row for row in job["payload"]["rows"]}
+    assert rows_by_import_id["INAB:ENTRYREF.1"]["status"] == "duplicate"
+    assert rows_by_import_id["INAB:ENTRYREF.2"]["status"] == "ready"
+
+
+def test_upload_preview_matches_structured_reference_alias_with_partial_existing_fingerprint(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
+    client, store, gateway = app_client
+    login(client)
+    store.save_selected_plan("plan-1", "Household")
+    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    gateway.existing_transactions_by_account[("plan-1", "checking-id")] = [
+        ExistingTransaction(
+            import_id="INAB:DETAILREFONE",
+            date=None,
+            amount=-19550,
+        ),
+        ExistingTransaction(
+            import_id="INAB:DETAILREFTWO",
+            date=date(2026, 5, 8),
+            amount=None,
+        ),
+    ]
+    entry = """
+<Ntry>
+  <Amt Ccy="CHF">39.10</Amt>
+  <CdtDbtInd>DBIT</CdtDbtInd>
+  <RvslInd>false</RvslInd>
+  <Sts><Cd>BOOK</Cd></Sts>
+  <BookgDt><Dt>2026-05-08</Dt></BookgDt>
+  <ValDt><Dt>2026-05-08</Dt></ValDt>
+  <AcctSvcrRef>ENTRYREF</AcctSvcrRef>
+  <NtryDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">19.55</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RltdPties><Cdtr><Pty><Nm>Insurance Example SA</Nm></Pty></Cdtr></RltdPties>
+      <RmtInf><Strd><CdtrRefInf><Ref>DETAILREFONE</Ref></CdtrRefInf></Strd></RmtInf>
+    </TxDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">19.55</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RltdPties><Cdtr><Pty><Nm>Insurance Example SA</Nm></Pty></Cdtr></RltdPties>
+      <RmtInf><Strd><CdtrRefInf><Ref>DETAILREFTWO</Ref></CdtrRefInf></Strd></RmtInf>
+    </TxDtls>
+  </NtryDtls>
+  <AddtlNtryInf>Paiement groupé</AddtlNtryInf>
+</Ntry>
+"""
+    content = camt_document(statement_xml("CH111", entry, opening="100.00", closing="60.90"))
+
+    upload = client.post("/uploads", files={"file": ("structured.xml", content, "application/xml")}, follow_redirects=False)
+
+    assert upload.status_code == 303
+    job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
+    assert job is not None
+    assert {row["status"] for row in job["payload"]["rows"]} == {"duplicate"}
+
+
+def test_upload_preview_does_not_match_ambiguous_structured_reference_alias_with_partial_fingerprint(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
+    client, store, gateway = app_client
+    login(client)
+    store.save_selected_plan("plan-1", "Household")
+    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    gateway.existing_transactions_by_account[("plan-1", "checking-id")] = [
+        ExistingTransaction(
+            import_id="INAB:RECURRINGREF",
+            date=None,
+            amount=-26950,
+        ),
+    ]
+    entry = """
+<Ntry>
+  <Amt Ccy="CHF">53.90</Amt>
+  <CdtDbtInd>DBIT</CdtDbtInd>
+  <RvslInd>false</RvslInd>
+  <Sts><Cd>BOOK</Cd></Sts>
+  <BookgDt><Dt>2026-05-08</Dt></BookgDt>
+  <ValDt><Dt>2026-05-08</Dt></ValDt>
+  <AcctSvcrRef>ENTRYREF</AcctSvcrRef>
+  <NtryDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">26.95</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RltdPties><Cdtr><Pty><Nm>Telecom Example SA</Nm></Pty></Cdtr></RltdPties>
+      <RmtInf><Strd><CdtrRefInf><Ref>RECURRINGREF</Ref></CdtrRefInf></Strd></RmtInf>
+    </TxDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">26.95</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RltdPties><Cdtr><Pty><Nm>Telecom Example SA</Nm></Pty></Cdtr></RltdPties>
+      <RmtInf><Strd><CdtrRefInf><Ref>RECURRINGREF</Ref></CdtrRefInf></Strd></RmtInf>
+    </TxDtls>
+  </NtryDtls>
+  <AddtlNtryInf>Paiement groupé</AddtlNtryInf>
+</Ntry>
+"""
+    content = camt_document(statement_xml("CH111", entry, opening="100.00", closing="46.10"))
+
+    upload = client.post("/uploads", files={"file": ("structured.xml", content, "application/xml")}, follow_redirects=False)
+
+    assert upload.status_code == 303
+    job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
+    assert job is not None
+    assert {row["status"] for row in job["payload"]["rows"]} == {"ready"}
 
 
 def test_upload_preview_applies_rules_even_when_other_ibans_are_unmapped(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
