@@ -1,53 +1,75 @@
 # INAB
 
-INAB is a self-hosted importer for Swiss bank CAMT.053 exports and a supported CSV bank export into YNAB.
+Import Swiss bank statements into YNAB from a self-hosted web app.
 
-The app is intentionally small: it runs a password-gated web UI, parses uploaded CAMT XML locally, previews transactions and likely internal transfers, then imports the confirmed rows through the official YNAB Python SDK.
+INAB parses CAMT.053 XML and supported CSV exports locally, lets you review them, then creates the confirmed transactions in YNAB.
 
-## Features
+![INAB import preview](docs/assets/inab-preview.png)
 
-- Drag/drop CAMT.053 XML uploads and supported semicolon CSV uploads.
-- Multi-account CAMT files with one or more `<Stmt>` blocks.
-- IBAN-to-YNAB account mapping stored in local SQLite.
-- Duplicate prevention through deterministic YNAB `import_id` values.
-- Preview of unambiguous checking/savings transfer pairs.
-- Import history with reconciliation details, duplicate evidence, and undo for transactions created by INAB.
-- Automatic cleanup of uncommitted preview/blocked/failed imports older than 7 days.
-- YNAB token supplied only through `YNAB_ACCESS_TOKEN`; it is never stored in SQLite.
+## How It Works
 
-MT940 exports are rejected in v1. See [docs/format-choice.md](docs/format-choice.md) for the rationale.
+![INAB import flow](docs/assets/inab-flow.svg)
 
-## Configuration
+1. Export a CAMT.053 XML file or supported CSV file from your bank.
+2. Upload it to INAB. Parsing, rules, duplicate checks, and transfer detection run locally.
+3. Review the preview screen.
+4. Import approved rows to YNAB through `TransactionsApi.create_transaction`.
 
-Required environment variables:
+## What It Does
 
-```sh
-export YNAB_ACCESS_TOKEN="..."
-export INAB_USERNAME="inab"
-export INAB_PASSWORD="choose-a-password"
-```
+- Imports Swiss CAMT.053 account statements and supported semicolon CSV exports.
+- Handles multi-account CAMT files with one or more `<Stmt>` blocks.
+- Stores IBAN-to-YNAB account mappings in local SQLite.
+- Previews rows before import, including reconciliation totals and duplicate matches.
+- Detects likely internal transfers between mapped accounts.
+- Uses deterministic YNAB `import_id` values to avoid repeat imports.
+- Keeps import history and can undo transactions created by INAB.
 
-Optional environment variables:
+## Supported Banks And Formats
 
-```sh
-export INAB_DATA_DIR="./data"
-export INAB_SESSION_SECRET="stable-cookie-signing-secret"
-export INAB_MAX_UPLOAD_BYTES="10485760"
-export INAB_TARGET_CURRENCY="CHF"
-export INAB_SELF_NAMES="Alex Example,Example Alex"
-export INAB_ROOT_PATH="/inab"
-```
+| Format       | Support                                                                   |
+| ------------ | ------------------------------------------------------------------------- |
+| CAMT.053 XML | Tested Swiss CAMT.053 exports are supported.                              |
+| CSV          | Neon CSV exports are supported. Other bank CSV layouts are not supported yet. |
+| MT940        | Not supported                                                             |
 
-For self-hosting, put the app behind HTTPS and keep `INAB_DATA_DIR` on persistent storage. Set `INAB_ROOT_PATH` only when the app is published under a URL prefix such as `https://example.test/inab`; leave it empty when serving at the domain root.
-
-## Run Locally
+## Quick Start
 
 ```sh
 uv sync --extra dev
+
+export YNAB_ACCESS_TOKEN="..."
+export INAB_USERNAME="inab"
+export INAB_PASSWORD="choose-a-password"
+
 uv run uvicorn inab.web:create_app --factory --reload
 ```
 
-Open `http://127.0.0.1:8000`, log in, select your YNAB plan, then upload a CAMT.053 XML export once so the app can discover IBANs. Map each discovered IBAN to a YNAB account in Setup, then upload again to preview and import. For CSV uploads, select the target YNAB account on the upload form because the CSV file itself does not include one.
+Open <http://127.0.0.1:8000> and sign in. Choose your YNAB plan in Setup, then upload a CAMT.053 XML file once so INAB can discover IBANs. Map each discovered IBAN to a YNAB account, upload again, review the preview, and import.
+
+For CSV uploads, choose the target YNAB account on the upload form. The supported CSV format does not include an account identifier.
+
+## Privacy And Data
+
+INAB runs on your machine or server. Bank exports are parsed on the machine running the app, and local state is stored in SQLite under `INAB_DATA_DIR`.
+
+Stored locally:
+
+- account mappings
+- import rules
+- import history
+- observed IBANs and counterparty labels
+- YNAB transaction IDs created by INAB, used for undo
+
+Sent to YNAB:
+
+- transactions you confirm for import
+- account, plan, payee, and category lookups needed by the UI
+
+Not stored in SQLite:
+
+- `YNAB_ACCESS_TOKEN`, which stays in your deployment environment
+- the uploaded bank file itself
 
 ## Docker
 
@@ -61,31 +83,53 @@ docker run --rm -p 8000:8000 \
   inab
 ```
 
+If you expose INAB outside localhost, put it behind HTTPS. Keep `/data` on persistent storage.
+
+## Configuration
+
+Required:
+
+```sh
+YNAB_ACCESS_TOKEN="..."
+INAB_USERNAME="inab"
+INAB_PASSWORD="choose-a-password"
+```
+
+Optional:
+
+```sh
+INAB_DATA_DIR="./data"
+INAB_SESSION_SECRET="stable-cookie-signing-secret"
+INAB_MAX_UPLOAD_BYTES="10485760"
+INAB_TARGET_CURRENCY="CHF"
+INAB_SELF_NAMES="Alex Example,Example Alex"
+INAB_ROOT_PATH="/inab"
+```
+
+Set `INAB_ROOT_PATH` only when publishing the app under a URL prefix such as `https://example.test/inab`.
+
+## Import Rules
+
+INAB can rewrite payees and assign YNAB categories before import. Rules are edited in the web UI and stored in SQLite. The preview shows the original payee, matched rule, and assigned category before import.
+
 ## Import Behavior
 
 - CAMT `DBIT` entries become negative YNAB amounts; `CRDT` entries become positive amounts.
-- CSV `Amount` values are already signed; the app imports positive values as inflows and negative values as outflows.
+- CSV `Amount` values are already signed.
 - Amounts are converted to YNAB milliunits with `Decimal * 1000`.
 - Imported transactions are created with `cleared="cleared"` and `approved=false`.
-- `AcctSvcrRef` becomes `INAB:<AcctSvcrRef>` when it fits YNAB’s 36-character import ID limit.
-- Entries without a usable bank reference, including CSV rows, get a deterministic hash-based `INAB:<hash>` import ID.
-- Before import, the app fetches existing YNAB transactions for each mapped account from the earliest uploaded date and skips matching import IDs.
-- Imported jobs keep the YNAB transaction IDs created by INAB. Undo deletes only those created transactions and marks the job reverted when every delete succeeds.
-- Uncommitted preview, blocked, and failed jobs without created YNAB transaction IDs are pruned after 7 days during normal app use.
-- Accepted internal transfers are imported once from the debit-side account using the target account’s `transfer_payee_id`; the credit-side CAMT row is skipped as the transfer counterpart.
-- If a CAMT entry contains richer `NtryDtls/TxDtls` data, generic labels such as `Ordre permanent` and `Paiement groupé` are enriched with counterparty and remittance details.
-- Grouped CAMT entries are split into individual YNAB transactions only when every detail has an amount and the signed detail total exactly reconciles to the booked entry amount.
-- Payees are normalized from bank labels when no better structured counterparty exists. For example, `Achat TWINT TRANSIT EXAMPLE` becomes `Transit Example`, `Achat online EXAMPLE STORE ... No carte ...` drops card/date details, and `Paiement TWINT EXAMPLE, ALEX` becomes `Alex Example`.
-- CAMT detail counterparties are recorded with name, IBAN, and bank when present. Setup can label known counterparty IBANs for your own external accounts.
-- When a transaction's counterparty name matches an own-name alias and the counterparty IBAN has a saved label, INAB relabels it as `Transfer to <label>` or `Transfer from <label>` before preview/import. Own-name aliases can be supplied with `INAB_SELF_NAMES` or edited in Setup.
-- Multi-account CAMT files may include empty statement blocks. INAB records those IBANs as observed accounts, but only IBANs with transactions must be mapped before import.
-- CSV memo fields include the source description plus subject, category, tags, Wise/Spaces flags, and original FX amount when present.
+- `AcctSvcrRef` becomes `INAB:<AcctSvcrRef>` when it fits YNAB's 36-character import ID limit.
+- Rows without a usable bank reference get a deterministic hash-based `INAB:<hash>` import ID.
+- Before import, INAB fetches existing YNAB transactions for each mapped account and skips matching import IDs.
+- YNAB can match an INAB-imported row to a user-entered transaction on the same account with the same amount and a date within 10 days.
+- Transfer pairs are imported once from the debit-side account using the target account's `transfer_payee_id`.
+- Preview, blocked, and failed jobs without created YNAB transaction IDs are pruned after 7 days.
 
-## YNAB API Notes
+## YNAB API
 
-INAB uses the official `ynab` package, currently pinned to `4.1.0`, generated from YNAB API spec `1.83.0`.
+INAB uses the official `ynab` package, pinned to `4.1.0` and generated from YNAB API spec `1.83.0`.
 
-The app uses:
+Used endpoints:
 
 - `PlansApi.get_plans`
 - `AccountsApi.get_accounts`
@@ -93,9 +137,9 @@ The app uses:
 - `TransactionsApi.create_transaction`
 - `TransactionsApi.delete_transaction`
 
-It does not use `TransactionsApi.import_transactions`; that endpoint triggers import for linked/direct-import accounts and does not upload custom parsed statement rows.
+INAB does not use `TransactionsApi.import_transactions`; that endpoint triggers YNAB import for linked/direct-import accounts and does not upload parsed statement rows.
 
-Primary references:
+References:
 
 - <https://api.ynab.com/>
 - <https://api.ynab.com/papi/open_api_spec.yaml>
@@ -108,4 +152,4 @@ Primary references:
 uv run pytest
 ```
 
-The parser test will use the local `sample/` CAMT export when present. The sample directory is ignored by git because bank exports contain private account data.
+Parser tests use the local `sample/` CAMT export when present. The sample directory is ignored by git because bank exports contain private account data.

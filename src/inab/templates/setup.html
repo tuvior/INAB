@@ -18,12 +18,12 @@
 <section class="setup-section">
   <div class="setup-section-header">
     <h2>YNAB</h2>
-    <p class="muted">Choose the budget and connect bank account identifiers to YNAB accounts.</p>
+    <p class="muted">Choose the plan and connect bank account identifiers to YNAB accounts.</p>
   </div>
   <form class="settings-row plan-selector" method="post" action="{{ url_path_for('setup') }}">
     <input type="hidden" name="action" value="plan">
     <label class="plan-selector-field">
-      <span>Budget</span>
+      <span>Plan</span>
       <select name="plan_id" required>
         <option value="">Select a plan</option>
         {% for plan in plans %}

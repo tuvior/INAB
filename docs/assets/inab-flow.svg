@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="260" viewBox="0 0 1080 260" role="img" aria-labelledby="title desc">
+  <title id="title">INAB import flow</title>
+  <desc id="desc">Bank export files are parsed locally, reviewed in INAB, and approved rows are sent to YNAB through the API.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#176b87"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-20%" width="120%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#101828" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+  <rect width="1080" height="260" rx="16" fill="#f6f7f9"/>
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+    <g filter="url(#shadow)">
+      <rect x="42" y="62" width="208" height="136" rx="10" fill="#ffffff" stroke="#d8dee8"/>
+      <rect x="300" y="62" width="208" height="136" rx="10" fill="#ffffff" stroke="#d8dee8"/>
+      <rect x="558" y="62" width="208" height="136" rx="10" fill="#ffffff" stroke="#d8dee8"/>
+      <rect x="816" y="62" width="208" height="136" rx="10" fill="#ffffff" stroke="#d8dee8"/>
+    </g>
+
+    <g fill="none" stroke="#176b87" stroke-width="3" stroke-linecap="round" marker-end="url(#arrow)">
+      <path d="M250 130 H286"/>
+      <path d="M508 130 H544"/>
+      <path d="M766 130 H802"/>
+    </g>
+
+    <g fill="#17202a" font-weight="700" font-size="21">
+      <text x="70" y="108">Bank export</text>
+      <text x="328" y="108">Local parser</text>
+      <text x="586" y="108">Review in INAB</text>
+      <text x="844" y="108">YNAB API</text>
+    </g>
+
+    <g fill="#647184" font-size="15">
+      <text x="70" y="139">CAMT.053 XML</text>
+      <text x="70" y="162">supported CSV</text>
+
+      <text x="328" y="139">normalize payees</text>
+      <text x="328" y="162">apply rules</text>
+
+      <text x="586" y="139">reconcile totals</text>
+      <text x="586" y="162">check duplicates</text>
+
+      <text x="844" y="139">create transactions</text>
+      <text x="844" y="162">with import IDs</text>
+    </g>
+  </g>
+</svg>
