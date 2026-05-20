@@ -17,8 +17,8 @@
   {% if not jobs %}
     <p class="muted">No imports yet.</p>
   {% else %}
-    <div class="table-wrap history-table-wrap">
-      <table class="history-table">
+    <div class="table-wrap history-table-wrap mobile-card-wrap">
+      <table class="history-table mobile-card-table">
         <colgroup>
           <col class="history-file-col">
           <col class="history-status-col">
@@ -48,16 +48,16 @@
         <tbody>
           {% for job in jobs %}
             <tr>
-              <td class="history-file">{{ job.filename }}</td>
-              <td><span class="chip chip-{{ job.status }}">{{ job.status }}</span></td>
-              <td class="mono history-date">{{ job.created_at[:16]|replace("T", " ") }}</td>
-              <td class="mono history-date">{{ job.updated_at[:16]|replace("T", " ") }}</td>
-              <td class="right">{{ job.transaction_count }}</td>
-              <td class="right">{{ job.ready_count }}</td>
-              <td class="right">{{ job.duplicate_count }}</td>
-              <td class="right">{{ job.transfer_count }}</td>
-              <td class="right">{{ job.created_count }}</td>
-              <td class="right"><a class="button secondary" href="{{ url_path_for('import_preview', job_id=job.id) }}">Open</a></td>
+              <td class="history-file" data-label="File">{{ job.filename }}</td>
+              <td data-label="Status"><span class="chip chip-{{ job.status }}">{{ job.status }}</span></td>
+              <td class="mono history-date" data-label="Created">{{ job.created_at[:16]|replace("T", " ") }}</td>
+              <td class="mono history-date" data-label="Updated">{{ job.updated_at[:16]|replace("T", " ") }}</td>
+              <td class="right" data-label="Rows">{{ job.transaction_count }}</td>
+              <td class="right" data-label="Ready">{{ job.ready_count }}</td>
+              <td class="right" data-label="Duplicates">{{ job.duplicate_count }}</td>
+              <td class="right" data-label="Transfers">{{ job.transfer_count }}</td>
+              <td class="right" data-label="Created">{{ job.created_count }}</td>
+              <td class="right" data-label=""><a class="button secondary" href="{{ url_path_for('import_preview', job_id=job.id) }}">Open</a></td>
             </tr>
           {% endfor %}
         </tbody>

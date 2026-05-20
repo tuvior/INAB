@@ -136,7 +136,7 @@ def create_app(
                     store.dismiss_observed_account(str(form.get("iban") or ""))
                     return _redirect(request, "/setup")
                 if action == "self_names":
-                    _save_self_names(store, str(form.get("self_names") or ""))
+                    _save_self_names(store, [str(item) for item in form.getlist("self_names")])
                     return _redirect(request, "/setup")
                 if action == "counterparty_mapping":
                     _save_counterparty_mapping(
@@ -182,7 +182,7 @@ def create_app(
             "counterparty_mappings": counterparty_mappings,
             "selected_plan_id": store.selected_plan()[0],
             "selected_plan_name": store.selected_plan()[1],
-            "self_names": ", ".join(self_names),
+            "self_names": self_names,
             "ynab_configured": settings.ynab_configured,
             "error": post_error,
         }
@@ -523,8 +523,8 @@ def _save_mapping(store: Store, gateway: YnabGateway, *, iban: str, account_id: 
     )
 
 
-def _save_self_names(store: Store, raw_names: str) -> None:
-    names = [item.strip() for item in re.split(r"[\n,]+", raw_names) if item.strip()]
+def _save_self_names(store: Store, raw_names: list[str]) -> None:
+    names = [item.strip() for raw_name in raw_names for item in re.split(r"[\n,]+", raw_name) if item.strip()]
     store.save_self_names(names)
 
 

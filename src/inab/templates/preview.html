@@ -134,8 +134,8 @@
 
 <section>
   <h2>Statements</h2>
-  <div class="table-wrap">
-    <table>
+  <div class="table-wrap mobile-card-wrap">
+    <table class="mobile-card-table">
       <thead>
         <tr>
           <th>Account</th>
@@ -154,15 +154,15 @@
           {% set reconciliation = statement.reconciliation|default(none) %}
           {% set reconciliation_status = reconciliation.status if reconciliation else ('reconciled' if statement.balances_reconcile == true else 'mismatch' if statement.balances_reconcile == false else 'missing') %}
           <tr class="{% if reconciliation_status == 'mismatch' %}row-warning{% endif %}">
-            <td>{{ statement.ynab_account_name or statement.iban }}</td>
-            <td>{{ statement.currency }}</td>
-            <td>{{ statement.transactions|length }}</td>
-            <td>{{ statement.movement_total|money }}</td>
-            <td>{% if reconciliation and reconciliation.opening %}{{ reconciliation.opening|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
-            <td>{% if reconciliation and reconciliation.expected_closing %}{{ reconciliation.expected_closing|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
-            <td>{% if reconciliation and reconciliation.actual_closing %}{{ reconciliation.actual_closing|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
-            <td>{% if reconciliation and reconciliation.delta %}{{ reconciliation.delta|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
-            <td><span class="chip chip-{{ reconciliation_status }}">{{ reconciliation_status }}</span></td>
+            <td data-label="Account">{{ statement.ynab_account_name or statement.iban }}</td>
+            <td data-label="Currency">{{ statement.currency }}</td>
+            <td data-label="Entries">{{ statement.transactions|length }}</td>
+            <td data-label="Movement">{{ statement.movement_total|money }}</td>
+            <td data-label="Opening">{% if reconciliation and reconciliation.opening %}{{ reconciliation.opening|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+            <td data-label="Expected closing">{% if reconciliation and reconciliation.expected_closing %}{{ reconciliation.expected_closing|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+            <td data-label="Actual closing">{% if reconciliation and reconciliation.actual_closing %}{{ reconciliation.actual_closing|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+            <td data-label="Delta">{% if reconciliation and reconciliation.delta %}{{ reconciliation.delta|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+            <td data-label="Reconciliation"><span class="chip chip-{{ reconciliation_status }}">{{ reconciliation_status }}</span></td>
           </tr>
         {% endfor %}
       </tbody>
@@ -217,8 +217,8 @@
       <input id="preview-search" type="search" placeholder="Payee, memo, account, status, import ID">
     </label>
   </div>
-  <div class="table-wrap">
-    <table>
+  <div class="table-wrap mobile-card-wrap">
+    <table class="mobile-card-table">
       <thead>
         <tr>
           <th>Date</th>
@@ -232,9 +232,9 @@
       <tbody id="preview-rows">
         {% for row in job.payload.rows %}
           <tr data-preview-row data-status="{{ row.status }}" data-search="{{ row.search_text|default('') }}">
-            <td>{{ row.transaction.booking_date }}</td>
-            <td>{{ row.ynab_account_name or row.transaction.iban }}</td>
-            <td>
+            <td data-label="Date">{{ row.transaction.booking_date }}</td>
+            <td data-label="Account">{{ row.ynab_account_name or row.transaction.iban }}</td>
+            <td data-label="Payee">
               {{ row.transaction.payee }}
               {% if row.transaction.original_payee %}
                 <span class="muted block">Original payee: {{ row.transaction.original_payee }}</span>
@@ -256,9 +256,9 @@
                 </span>
               {% endif %}
             </td>
-            <td class="right amount {% if row.transaction.amount|string|first == '-' %}negative{% else %}positive{% endif %}">{{ row.transaction.amount|money }}</td>
-            <td><span class="chip chip-{{ row.status }}">{{ row.status }}</span></td>
-            <td class="mono">{{ row.transaction.import_id }}</td>
+            <td class="right amount {% if row.transaction.amount|string|first == '-' %}negative{% else %}positive{% endif %}" data-label="Amount">{{ row.transaction.amount|money }}</td>
+            <td data-label="Status"><span class="chip chip-{{ row.status }}">{{ row.status }}</span></td>
+            <td class="mono" data-label="Import ID">{{ row.transaction.import_id }}</td>
           </tr>
         {% endfor %}
       </tbody>

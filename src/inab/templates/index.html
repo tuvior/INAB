@@ -66,8 +66,8 @@
 {% if mappings %}
 <section>
   <h2>Configured mappings</h2>
-  <div class="table-wrap">
-    <table>
+  <div class="table-wrap mobile-card-wrap">
+    <table class="mobile-card-table">
       <thead>
         <tr>
           <th>IBAN</th>
@@ -77,8 +77,8 @@
       <tbody>
         {% for mapping in mappings %}
           <tr>
-            <td>{{ mapping.iban }}</td>
-            <td>{{ mapping.ynab_account_name }}</td>
+            <td data-label="IBAN">{{ mapping.iban }}</td>
+            <td data-label="YNAB account">{{ mapping.ynab_account_name }}</td>
           </tr>
         {% endfor %}
       </tbody>

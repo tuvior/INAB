@@ -115,8 +115,8 @@
   {% if not payees %}
     <p class="muted">No payees loaded.</p>
   {% else %}
-    <div class="table-wrap">
-      <table>
+    <div class="table-wrap mobile-card-wrap">
+      <table class="mobile-card-table">
         <thead>
           <tr>
             <th>Payee</th>
@@ -128,21 +128,21 @@
         <tbody>
           {% for item in payees %}
             <tr>
-              <td>
+              <td data-label="Payee">
                 {{ item.payee.name }}
                 {% if item.is_transfer %}
                   <span class="muted block">Transfer payee</span>
                 {% endif %}
               </td>
-              <td>
+              <td data-label="Matched rule">
                 {% if item.evaluation.matched %}
                   {{ item.evaluation.matched_rule_name }}
                 {% else %}
                   <span class="muted">No match</span>
                 {% endif %}
               </td>
-              <td>{{ item.evaluation.output_payee }}</td>
-              <td>
+              <td data-label="Output">{{ item.evaluation.output_payee }}</td>
+              <td data-label="Category">
                 {% if item.evaluation.output_category_name %}
                   {{ item.evaluation.output_category_name }}
                 {% else %}

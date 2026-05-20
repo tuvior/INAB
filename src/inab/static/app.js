@@ -5,6 +5,84 @@ const fileName = document.getElementById("file-name");
 const csvAccountPanel = document.getElementById("csv-account-panel");
 const csvAccountSelect = document.getElementById("csv-account-select");
 const previewButton = document.getElementById("preview-button");
+const selfNameList = document.getElementById("self-name-list");
+const addSelfNameButton = document.querySelector("[data-add-self-name]");
+const scrollRestoreKey = `inab:scroll:${window.location.pathname}${window.location.search}`;
+
+try {
+  const savedScroll = sessionStorage.getItem(scrollRestoreKey);
+  if (savedScroll !== null) {
+    sessionStorage.removeItem(scrollRestoreKey);
+    const nextScrollY = Number.parseInt(savedScroll, 10);
+    if (Number.isFinite(nextScrollY)) {
+      requestAnimationFrame(() => window.scrollTo({ top: nextScrollY }));
+    }
+  }
+} catch {
+  // Ignore storage failures; form submissions should still work normally.
+}
+
+document.querySelectorAll("form[method='post'], form[method='POST']").forEach((form) => {
+  form.addEventListener("submit", () => {
+    const action = form.getAttribute("action") || window.location.href;
+    const actionUrl = new URL(action, window.location.href);
+    const currentUrl = new URL(window.location.href);
+    if (actionUrl.pathname !== currentUrl.pathname || actionUrl.search !== currentUrl.search) {
+      return;
+    }
+    try {
+      sessionStorage.setItem(scrollRestoreKey, String(window.scrollY));
+    } catch {
+      // Ignore storage failures; the server-side POST/redirect remains authoritative.
+    }
+  });
+});
+
+if (selfNameList && addSelfNameButton) {
+  const createSelfNameRow = (value = "") => {
+    const row = document.createElement("div");
+    row.className = "own-name-row";
+
+    const input = document.createElement("input");
+    input.name = "self_names";
+    input.placeholder = "Alex Example";
+    input.value = value;
+    input.setAttribute("aria-label", "Own-name alias");
+
+    const removeButton = document.createElement("button");
+    removeButton.className = "secondary";
+    removeButton.type = "button";
+    removeButton.dataset.removeSelfName = "";
+    removeButton.textContent = "Remove";
+
+    row.append(input, removeButton);
+    return row;
+  };
+
+  const ensureSelfNameRow = () => {
+    if (selfNameList.querySelectorAll(".own-name-row").length === 0) {
+      selfNameList.append(createSelfNameRow());
+    }
+  };
+
+  addSelfNameButton.addEventListener("click", () => {
+    const row = createSelfNameRow();
+    selfNameList.append(row);
+    row.querySelector("input").focus();
+  });
+
+  selfNameList.addEventListener("click", (event) => {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+    const removeButton = event.target.closest("[data-remove-self-name]");
+    if (!removeButton) {
+      return;
+    }
+    removeButton.closest(".own-name-row").remove();
+    ensureSelfNameRow();
+  });
+}
 
 if (dropZone && fileInput && fileName) {
   const uploadCanSubmit = () => {

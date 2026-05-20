@@ -20,27 +20,19 @@
     <h2>YNAB</h2>
     <p class="muted">Choose the budget and connect bank account identifiers to YNAB accounts.</p>
   </div>
-  <div class="setup-grid">
-    <section class="panel form-stack compact-panel">
-      <h3>Budget</h3>
-      <form class="inline-form" method="post" action="{{ url_path_for('setup') }}">
-        <input type="hidden" name="action" value="plan">
-        <label class="grow">
-          <span>Plan</span>
-          <select name="plan_id" required>
-            <option value="">Select a plan</option>
-            {% for plan in plans %}
-              <option value="{{ plan.id }}" {% if plan.id == selected_plan_id %}selected{% endif %}>{{ plan.name }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <button type="submit">Save plan</button>
-      </form>
-      {% if selected_plan_name %}
-        <p class="muted">Current plan: {{ selected_plan_name }}</p>
-      {% endif %}
-    </section>
-  </div>
+  <form class="settings-row plan-selector" method="post" action="{{ url_path_for('setup') }}">
+    <input type="hidden" name="action" value="plan">
+    <label class="plan-selector-field">
+      <span>Budget</span>
+      <select name="plan_id" required>
+        <option value="">Select a plan</option>
+        {% for plan in plans %}
+          <option value="{{ plan.id }}" {% if plan.id == selected_plan_id %}selected{% endif %}>{{ plan.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Save plan</button>
+  </form>
 </section>
 
 <section class="setup-section">
@@ -120,8 +112,8 @@
   {% if mappings %}
     <section>
       <h3>Saved mappings</h3>
-      <div class="table-wrap">
-        <table>
+      <div class="table-wrap mobile-card-wrap">
+        <table class="mobile-card-table">
           <thead>
             <tr>
               <th>IBAN</th>
@@ -132,9 +124,9 @@
           <tbody>
             {% for mapping in mappings %}
               <tr>
-                <td>{{ mapping.iban }}</td>
-                <td>{{ mapping.ynab_account_name }}</td>
-                <td class="right">
+                <td data-label="IBAN">{{ mapping.iban }}</td>
+                <td data-label="YNAB account">{{ mapping.ynab_account_name }}</td>
+                <td class="right" data-label="">
                   <form method="post" action="{{ url_path_for('setup') }}">
                     <input type="hidden" name="action" value="delete_mapping">
                     <input type="hidden" name="iban" value="{{ mapping.iban }}">
@@ -155,17 +147,27 @@
     <h2>Personal Helpers</h2>
     <p class="muted">Identify your own name and label external accounts that appear as counterparties.</p>
   </div>
-  <div class="setup-grid">
+  <div class="setup-grid personal-helper-grid">
     <section class="panel form-stack compact-panel">
       <h3>Own-name aliases</h3>
       <p class="muted">Rows paid to one of these names can be relabeled when their counterparty IBAN is mapped.</p>
-      <form class="form-stack" method="post" action="{{ url_path_for('setup') }}">
+      <form id="self-name-form" class="form-stack" method="post" action="{{ url_path_for('setup') }}">
         <input type="hidden" name="action" value="self_names">
-        <label>
-          <span>Names</span>
-          <textarea name="self_names" rows="3" placeholder="Alex Example, Example Alex">{{ self_names }}</textarea>
-        </label>
-        <div class="form-actions">
+        <div id="self-name-list" class="own-name-list">
+          {% for name in self_names %}
+            <div class="own-name-row">
+              <input name="self_names" value="{{ name }}" placeholder="Alex Example" aria-label="Own-name alias">
+              <button class="secondary" type="button" data-remove-self-name>Remove</button>
+            </div>
+          {% else %}
+            <div class="own-name-row">
+              <input name="self_names" placeholder="Alex Example" aria-label="Own-name alias">
+              <button class="secondary" type="button" data-remove-self-name>Remove</button>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="form-actions split-actions">
+          <button class="secondary" type="button" data-add-self-name>Add name</button>
           <button type="submit">Save aliases</button>
         </div>
       </form>
@@ -174,7 +176,7 @@
     <section class="panel form-stack compact-panel">
       <h3>Counterparty label</h3>
       <p class="muted">Label accounts outside uploaded YNAB accounts, such as pension, mortgage, or another bank.</p>
-      <form class="inline-form" method="post" action="{{ url_path_for('setup') }}">
+      <form class="counterparty-label-form" method="post" action="{{ url_path_for('setup') }}">
         <input type="hidden" name="action" value="counterparty_mapping">
         <label class="grow">
           <span>Counterparty IBAN</span>
@@ -221,8 +223,8 @@
   {% if counterparty_mappings %}
     <section>
       <h3>Saved counterparty labels</h3>
-      <div class="table-wrap">
-        <table>
+      <div class="table-wrap mobile-card-wrap">
+        <table class="mobile-card-table">
           <thead>
             <tr>
               <th>IBAN</th>
@@ -233,9 +235,9 @@
           <tbody>
             {% for mapping in counterparty_mappings %}
               <tr>
-                <td>{{ mapping.iban }}</td>
-                <td>{{ mapping.label }}</td>
-                <td class="right">
+                <td data-label="IBAN">{{ mapping.iban }}</td>
+                <td data-label="Label">{{ mapping.label }}</td>
+                <td class="right" data-label="">
                   <form method="post" action="{{ url_path_for('setup') }}">
                     <input type="hidden" name="action" value="delete_counterparty_mapping">
                     <input type="hidden" name="iban" value="{{ mapping.iban }}">

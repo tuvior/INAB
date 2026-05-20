@@ -915,6 +915,21 @@ def test_setup_hides_labeled_and_dismissed_counterparty_suggestions(app_client: 
     assert "CH444" not in response.text
 
 
+def test_setup_saves_self_names_from_repeated_rows(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+    client, store, _ = app_client
+    login(client)
+
+    response = client.post(
+        "/setup",
+        content="action=self_names&self_names=Alex+Example&self_names=&self_names=Example+Alex%2C+T+Example",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert store.self_names() == ["Alex Example", "Example Alex", "A Example"]
+
+
 def test_rule_edited_csv_row_keeps_original_import_id(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
     client, store, _ = app_client
     login(client)
