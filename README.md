@@ -75,7 +75,7 @@ docker run --rm -p 8000:8000 \
 - Accepted internal transfers are imported once from the debit-side account using the target account’s `transfer_payee_id`; the credit-side CAMT row is skipped as the transfer counterpart.
 - If a CAMT entry contains richer `NtryDtls/TxDtls` data, generic labels such as `Ordre permanent` and `Paiement groupé` are enriched with counterparty and remittance details.
 - Grouped CAMT entries are split into individual YNAB transactions only when every detail has an amount and the signed detail total exactly reconciles to the booked entry amount.
-- Payees are normalized from bank labels when no better structured counterparty exists. For example, `Achat TWINT SBB MOBILE` becomes `SBB Mobile`, `Achat online ... No carte ...` drops card/date details, and `Paiement TWINT EXAMPLE, ALEX` becomes `Alex Example`.
+- Payees are normalized from bank labels when no better structured counterparty exists. For example, `Achat TWINT TRANSIT EXAMPLE` becomes `Transit Example`, `Achat online EXAMPLE STORE ... No carte ...` drops card/date details, and `Paiement TWINT EXAMPLE, ALEX` becomes `Alex Example`.
 - CAMT detail counterparties are recorded with name, IBAN, and bank when present. Setup can label known counterparty IBANs for your own external accounts.
 - When a transaction's counterparty name matches an own-name alias and the counterparty IBAN has a saved label, INAB relabels it as `Transfer to <label>` or `Transfer from <label>` before preview/import. Own-name aliases can be supplied with `INAB_SELF_NAMES` or edited in Setup.
 - Multi-account CAMT files may include empty statement blocks. INAB records those IBANs as observed accounts, but only IBANs with transactions must be mapped before import.

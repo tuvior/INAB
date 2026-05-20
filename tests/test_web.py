@@ -598,7 +598,7 @@ def test_upload_preview_marks_legacy_split_import_id_as_duplicate(app_client: tu
     <TxDtls>
       <Amt Ccy="CHF">1.00</Amt>
       <CdtDbtInd>DBIT</CdtDbtInd>
-      <RltdPties><Cdtr><Pty><Nm>Other SA</Nm></Pty></Cdtr></RltdPties>
+      <RltdPties><Cdtr><Pty><Nm>Other Example SA</Nm></Pty></Cdtr></RltdPties>
     </TxDtls>
     <TxDtls>
       <Amt Ccy="CHF">600.00</Amt>
@@ -921,7 +921,7 @@ def test_setup_saves_self_names_from_repeated_rows(app_client: tuple[TestClient,
 
     response = client.post(
         "/setup",
-        content="action=self_names&self_names=Alex+Example&self_names=&self_names=Example+Alex%2C+T+Example",
+        content="action=self_names&self_names=Alex+Example&self_names=&self_names=Example+Alex%2C+A+Example",
         headers={"content-type": "application/x-www-form-urlencoded"},
         follow_redirects=False,
     )

@@ -218,12 +218,12 @@ def test_recurring_structured_references_do_not_duplicate_split_import_ids() -> 
       <Amt Ccy="CHF">29.90</Amt>
       <CdtDbtInd>DBIT</CdtDbtInd>
       <RltdPties><Cdtr><Pty><Nm>Telecom Example SA</Nm></Pty></Cdtr><CdtrAcct><Id><IBAN>CH0000000000000000003</IBAN></Id></CdtrAcct></RltdPties>
-      <RmtInf><Strd><CdtrRefInf><Ref>RECURRINGREF</Ref></CdtrRefInf></Strd></RmtInf>
+      <RmtInf><Strd><CdtrRefInf><Ref>MONTHLYREF</Ref></CdtrRefInf></Strd></RmtInf>
     </TxDtls>
     <TxDtls>
       <Amt Ccy="CHF">1.00</Amt>
       <CdtDbtInd>DBIT</CdtDbtInd>
-      <RltdPties><Cdtr><Pty><Nm>Other SA</Nm></Pty></Cdtr><CdtrAcct><Id><IBAN>CH0000000000000000001</IBAN></Id></CdtrAcct></RltdPties>
+      <RltdPties><Cdtr><Pty><Nm>Other Example SA</Nm></Pty></Cdtr><CdtrAcct><Id><IBAN>CH0000000000000000004</IBAN></Id></CdtrAcct></RltdPties>
       <RmtInf><Strd><CdtrRefInf><Ref>OTHER-{entry_ref}</Ref></CdtrRefInf></Strd></RmtInf>
     </TxDtls>
   </NtryDtls>
@@ -245,7 +245,7 @@ def test_recurring_structured_references_do_not_duplicate_split_import_ids() -> 
     telecom_transactions = [tx for tx in result.transactions if tx.payee == "Telecom Example SA"]
     assert [tx.source_ref for tx in telecom_transactions] == ["ENTRYREF1.1", "ENTRYREF2.1"]
     assert [tx.import_id for tx in telecom_transactions] == ["INAB:ENTRYREF1.1", "INAB:ENTRYREF2.1"]
-    assert all("Ref: RECURRINGREF" in (tx.memo or "") for tx in telecom_transactions)
+    assert all("Ref: MONTHLYREF" in (tx.memo or "") for tx in telecom_transactions)
 
 
 def test_split_detail_keeps_legacy_unique_detail_import_id_alias() -> None:
@@ -263,7 +263,7 @@ def test_split_detail_keeps_legacy_unique_detail_import_id_alias() -> None:
     <TxDtls>
       <Amt Ccy="CHF">1.00</Amt>
       <CdtDbtInd>DBIT</CdtDbtInd>
-      <RltdPties><Cdtr><Pty><Nm>Other SA</Nm></Pty></Cdtr></RltdPties>
+      <RltdPties><Cdtr><Pty><Nm>Other Example SA</Nm></Pty></Cdtr></RltdPties>
     </TxDtls>
     <TxDtls>
       <Amt Ccy="CHF">600.00</Amt>

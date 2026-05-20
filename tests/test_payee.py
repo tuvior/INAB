@@ -55,7 +55,7 @@ def test_payee_from_online_purchase_description() -> None:
 
 
 def test_payee_from_payment_and_credit_description() -> None:
-    assert payee_from_description("Paiement Telecom Example SA") == "Telecom Example SA"
+    assert payee_from_description("Paiement Example Mobile SA") == "Example Mobile SA"
     assert payee_from_description("Paiement TWINT EXAMPLE, ALEX") == "Alex Example"
     assert payee_from_description("Crédit TWINT SAMPLE, JAMIE") == "Jamie Sample"
     assert payee_from_description("Crédit EXAMPLE BENEFITS OFFICE") == "Example Benefits Office"
