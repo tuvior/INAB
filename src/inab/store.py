@@ -5,7 +5,7 @@ import sqlite3
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -489,11 +489,36 @@ class Store:
             row = connection.execute("select * from import_jobs where id = ?", (job_id,)).fetchone()
         if not row:
             return None
-        job = dict(row)
-        job["payload"] = json.loads(job.pop("payload_json"))
-        result_json = job.pop("result_json")
-        job["result"] = json.loads(result_json) if result_json else None
-        return job
+        return _job_from_row(row)
+
+    def list_jobs(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                select * from import_jobs
+                order by created_at desc
+                limit ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [_job_from_row(row) for row in rows]
+
+    def prune_stale_uncommitted_jobs(self, *, older_than_days: int = 7) -> int:
+        cutoff = (datetime.now(tz=UTC) - timedelta(days=older_than_days)).isoformat()
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                select id, result_json from import_jobs
+                where status in ('preview', 'blocked', 'failed')
+                  and created_at < ?
+                """,
+                (cutoff,),
+            ).fetchall()
+            stale_ids = [row["id"] for row in rows if not _result_created_transaction_ids(row["result_json"])]
+            if stale_ids:
+                placeholders = ",".join("?" for _ in stale_ids)
+                connection.execute(f"delete from import_jobs where id in ({placeholders})", tuple(stale_ids))
+        return len(stale_ids)
 
     def update_job(self, job_id: str, *, status: str, payload: dict[str, Any] | None = None, result: dict[str, Any] | None = None) -> None:
         assignments = ["status = ?", "updated_at = ?"]
@@ -510,6 +535,27 @@ class Store:
                 f"update import_jobs set {', '.join(assignments)} where id = ?",
                 tuple(values),
             )
+
+
+def _job_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    job = dict(row)
+    job["payload"] = json.loads(job.pop("payload_json"))
+    result_json = job.pop("result_json")
+    job["result"] = json.loads(result_json) if result_json else None
+    return job
+
+
+def _result_created_transaction_ids(result_json: str | None) -> list[str]:
+    if not result_json:
+        return []
+    try:
+        result = json.loads(result_json)
+    except json.JSONDecodeError:
+        return []
+    transaction_ids = result.get("transaction_ids") if isinstance(result, dict) else None
+    if not isinstance(transaction_ids, list):
+        return []
+    return [str(transaction_id) for transaction_id in transaction_ids if str(transaction_id)]
 
 
 def _rule_from_row(row: sqlite3.Row) -> ImportRule:

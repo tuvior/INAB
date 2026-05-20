@@ -117,6 +117,8 @@ class FakeGateway:
         self.existing_transactions_by_account: dict[tuple[str, str], list[ExistingTransaction]] = {}
         self.existing_calls: list[tuple[str, str, date | None]] = []
         self.created: list[dict[str, Any]] = []
+        self.deleted: list[tuple[str, str]] = []
+        self.delete_errors: dict[str, str] = {}
 
     def list_plans(self) -> list[YnabPlan]:
         return self.plans
@@ -143,6 +145,13 @@ class FakeGateway:
     def create_transactions(self, plan_id: str, transactions: list[dict[str, Any]]) -> CreateTransactionsResult:
         self.created.extend(transactions)
         return CreateTransactionsResult(transaction_ids=[f"ynab-{i}" for i, _ in enumerate(transactions, start=1)], duplicate_import_ids=[])
+
+    def delete_transaction(self, plan_id: str, transaction_id: str) -> None:
+        if transaction_id in self.delete_errors:
+            from inab.ynab_api import YnabError
+
+            raise YnabError(self.delete_errors[transaction_id])
+        self.deleted.append((plan_id, transaction_id))
 
 
 @pytest.fixture

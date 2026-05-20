@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Import History - INAB{% endblock %}
+{% block content %}
+<section class="toolbar-section">
+  <div>
+    <h1>Import history</h1>
+    <p class="muted">Recent previews, imports, failures, and reverted imports.</p>
+  </div>
+  <a class="button secondary" href="{{ url_path_for('index') }}">New upload</a>
+</section>
+
+{% if pruned_count %}
+  <div class="alert alert-ok">Cleaned up {{ pruned_count }} uncommitted import{% if pruned_count != 1 %}s{% endif %} older than {{ stale_days }} days.</div>
+{% endif %}
+
+<section>
+  {% if not jobs %}
+    <p class="muted">No imports yet.</p>
+  {% else %}
+    <div class="table-wrap history-table-wrap">
+      <table class="history-table">
+        <colgroup>
+          <col class="history-file-col">
+          <col class="history-status-col">
+          <col class="history-date-col">
+          <col class="history-date-col">
+          <col class="history-number-col">
+          <col class="history-number-col">
+          <col class="history-number-col">
+          <col class="history-number-col">
+          <col class="history-number-col">
+          <col class="history-action-col">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Updated</th>
+            <th class="right">Rows</th>
+            <th class="right">Ready</th>
+            <th class="right">Duplicates</th>
+            <th class="right">Transfers</th>
+            <th class="right">Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in jobs %}
+            <tr>
+              <td class="history-file">{{ job.filename }}</td>
+              <td><span class="chip chip-{{ job.status }}">{{ job.status }}</span></td>
+              <td class="mono history-date">{{ job.created_at[:16]|replace("T", " ") }}</td>
+              <td class="mono history-date">{{ job.updated_at[:16]|replace("T", " ") }}</td>
+              <td class="right">{{ job.transaction_count }}</td>
+              <td class="right">{{ job.ready_count }}</td>
+              <td class="right">{{ job.duplicate_count }}</td>
+              <td class="right">{{ job.transfer_count }}</td>
+              <td class="right">{{ job.created_count }}</td>
+              <td class="right"><a class="button secondary" href="{{ url_path_for('import_preview', job_id=job.id) }}">Open</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

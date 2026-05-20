@@ -37,11 +37,14 @@
 
 <section class="panel upload-panel">
   <form id="upload-form" method="post" action="{{ url_path_for('upload') }}" enctype="multipart/form-data">
-    <label id="drop-zone" class="drop-zone">
-      <input id="file-input" name="file" type="file" accept=".xml,.csv,text/xml,application/xml,text/csv" required>
-      <span class="drop-title">Drop a CAMT.053 XML or CSV file</span>
-      <span id="file-name" class="muted">or choose one from disk</span>
-    </label>
+    <div id="drop-zone" class="drop-zone">
+      <label class="drop-picker">
+        <input id="file-input" name="file" type="file" accept=".xml,.csv,text/xml,application/xml,text/csv" required>
+        <span class="drop-title">Drop a CAMT.053 XML or CSV file</span>
+        <span id="file-name" class="muted">or choose one from disk</span>
+      </label>
+      <button id="preview-button" class="drop-action" type="submit" disabled>Choose file to preview</button>
+    </div>
     <div id="csv-account-panel" class="csv-account-panel" hidden>
       {% if account_error %}
         <div class="alert alert-error">{{ account_error }}</div>
@@ -56,9 +59,6 @@
         </select>
       </label>
       <p class="muted">CSV files do not include an account identifier, so choose the destination account for each upload.</p>
-    </div>
-    <div class="form-actions">
-      <button type="submit">Preview import</button>
     </div>
   </form>
 </section>

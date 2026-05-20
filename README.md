@@ -11,6 +11,8 @@ The app is intentionally small: it runs a password-gated web UI, parses uploaded
 - IBAN-to-YNAB account mapping stored in local SQLite.
 - Duplicate prevention through deterministic YNAB `import_id` values.
 - Preview of unambiguous checking/savings transfer pairs.
+- Import history with reconciliation details, duplicate evidence, and undo for transactions created by INAB.
+- Automatic cleanup of uncommitted preview/blocked/failed imports older than 7 days.
 - YNAB token supplied only through `YNAB_ACCESS_TOKEN`; it is never stored in SQLite.
 
 MT940 exports are rejected in v1. See [docs/format-choice.md](docs/format-choice.md) for the rationale.
@@ -68,6 +70,8 @@ docker run --rm -p 8000:8000 \
 - `AcctSvcrRef` becomes `INAB:<AcctSvcrRef>` when it fits YNAB’s 36-character import ID limit.
 - Entries without a usable bank reference, including CSV rows, get a deterministic hash-based `INAB:<hash>` import ID.
 - Before import, the app fetches existing YNAB transactions for each mapped account from the earliest uploaded date and skips matching import IDs.
+- Imported jobs keep the YNAB transaction IDs created by INAB. Undo deletes only those created transactions and marks the job reverted when every delete succeeds.
+- Uncommitted preview, blocked, and failed jobs without created YNAB transaction IDs are pruned after 7 days during normal app use.
 - Accepted internal transfers are imported once from the debit-side account using the target account’s `transfer_payee_id`; the credit-side CAMT row is skipped as the transfer counterpart.
 - If a CAMT entry contains richer `NtryDtls/TxDtls` data, generic labels such as `Ordre permanent` and `Paiement groupé` are enriched with counterparty and remittance details.
 - Grouped CAMT entries are split into individual YNAB transactions only when every detail has an amount and the signed detail total exactly reconciles to the booked entry amount.
@@ -87,6 +91,7 @@ The app uses:
 - `AccountsApi.get_accounts`
 - `TransactionsApi.get_transactions_by_account`
 - `TransactionsApi.create_transaction`
+- `TransactionsApi.delete_transaction`
 
 It does not use `TransactionsApi.import_transactions`; that endpoint triggers import for linked/direct-import accounts and does not upload custom parsed statement rows.
 

@@ -6,7 +6,10 @@
     <h1>{{ job.filename }}</h1>
     <p class="muted">Status: {{ job.status }}</p>
   </div>
-  <a class="button secondary" href="{{ url_path_for('index') }}">New upload</a>
+  <div class="toolbar-actions">
+    <a class="button secondary" href="{{ url_path_for('import_history') }}">History</a>
+    <a class="button secondary" href="{{ url_path_for('index') }}">New upload</a>
+  </div>
 </section>
 
 {% for error in job.payload.errors %}
@@ -14,6 +17,20 @@
 {% endfor %}
 
 {% if job.result %}
+  {% if job.result.undo %}
+    {% if job.result.undo.errors %}
+      <div class="alert alert-error">
+        Undo deleted {{ job.result.undo.deleted_transaction_ids|length }} transaction{% if job.result.undo.deleted_transaction_ids|length != 1 %}s{% endif %}, but some deletes failed.
+        {% for error in job.result.undo.errors %}
+          <span class="block">{{ error }}</span>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="alert alert-ok">
+        Undo deleted {{ job.result.undo.deleted_transaction_ids|length }} YNAB transaction{% if job.result.undo.deleted_transaction_ids|length != 1 %}s{% endif %}.
+      </div>
+    {% endif %}
+  {% endif %}
   {% if job.result.errors %}
     {% for error in job.result.errors %}
       <div class="alert alert-error">{{ error }}</div>
@@ -23,6 +40,18 @@
       Created {{ job.result.created_count }} transactions. Skipped {{ job.result.skipped_duplicates|length }} duplicates and {{ job.result.skipped_transfer_counterparts|length }} transfer counterparts.
     </div>
   {% endif %}
+{% endif %}
+
+{% if can_undo %}
+  <section class="panel undo-panel">
+    <div>
+      <h2>Undo import</h2>
+      <p class="muted">Delete only the YNAB transactions created by this import.</p>
+    </div>
+    <form method="post" action="{{ url_path_for('undo_import', job_id=job.id) }}">
+      <button class="secondary danger" type="submit">Undo import</button>
+    </form>
+  </section>
 {% endif %}
 
 {% if job.payload.missing_ibans %}
@@ -71,6 +100,38 @@
   </div>
 </section>
 
+{% if job.payload.summary %}
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <h2>Import summary</h2>
+      <p class="muted">Final totals before sending ready rows to YNAB.</p>
+    </div>
+  </div>
+  <div class="summary-grid">
+    <div><span class="muted">Accounts</span><strong>{{ job.payload.summary.account_count }}</strong></div>
+    <div><span class="muted">Ready rows</span><strong>{{ job.payload.summary.ready_count }}</strong></div>
+    <div><span class="muted">Duplicates</span><strong>{{ job.payload.summary.duplicate_count }}</strong></div>
+    <div><span class="muted">Transfers</span><strong>{{ job.payload.summary.transfer_count }}</strong></div>
+    <div><span class="muted">Categorized</span><strong>{{ job.payload.summary.assigned_category_count }}</strong></div>
+    <div><span class="muted">Inflow</span><strong class="positive">{{ job.payload.summary.inflow_total|money }}</strong></div>
+    <div><span class="muted">Outflow</span><strong class="negative">{{ job.payload.summary.outflow_total|money }}</strong></div>
+    <div><span class="muted">Net</span><strong>{{ job.payload.summary.net_total|money }}</strong></div>
+  </div>
+</section>
+{% endif %}
+
+{% if job.payload.warnings %}
+  <section class="panel warning-panel">
+    <h2>Warnings</h2>
+    <ul class="warning-list">
+      {% for warning in job.payload.warnings %}
+        <li>{{ warning }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+{% endif %}
+
 <section>
   <h2>Statements</h2>
   <div class="table-wrap">
@@ -81,17 +142,27 @@
           <th>Currency</th>
           <th>Entries</th>
           <th>Movement</th>
-          <th>Balances</th>
+          <th>Opening</th>
+          <th>Expected closing</th>
+          <th>Actual closing</th>
+          <th>Delta</th>
+          <th>Reconciliation</th>
         </tr>
       </thead>
       <tbody>
         {% for statement in job.payload.statements %}
-          <tr>
+          {% set reconciliation = statement.reconciliation|default(none) %}
+          {% set reconciliation_status = reconciliation.status if reconciliation else ('reconciled' if statement.balances_reconcile == true else 'mismatch' if statement.balances_reconcile == false else 'missing') %}
+          <tr class="{% if reconciliation_status == 'mismatch' %}row-warning{% endif %}">
             <td>{{ statement.ynab_account_name or statement.iban }}</td>
             <td>{{ statement.currency }}</td>
             <td>{{ statement.transactions|length }}</td>
             <td>{{ statement.movement_total|money }}</td>
-            <td>{% if statement.balances_reconcile == true %}Reconciled{% elif statement.balances_reconcile == false %}Mismatch{% else %}No balances{% endif %}</td>
+            <td>{% if reconciliation and reconciliation.opening %}{{ reconciliation.opening|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+            <td>{% if reconciliation and reconciliation.expected_closing %}{{ reconciliation.expected_closing|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+            <td>{% if reconciliation and reconciliation.actual_closing %}{{ reconciliation.actual_closing|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+            <td>{% if reconciliation and reconciliation.delta %}{{ reconciliation.delta|money }}{% else %}<span class="muted">n/a</span>{% endif %}</td>
+            <td><span class="chip chip-{{ reconciliation_status }}">{{ reconciliation_status }}</span></td>
           </tr>
         {% endfor %}
       </tbody>
@@ -127,7 +198,25 @@
 
 {% if job.payload.rows %}
 <section>
-  <h2>Preview rows</h2>
+  <div class="panel-heading">
+    <div>
+      <h2>Preview rows</h2>
+      <p class="muted">Filter locally by status or search visible transaction details.</p>
+    </div>
+  </div>
+  <div id="preview-controls" class="preview-controls">
+    <div class="filter-buttons" aria-label="Preview row filters">
+      <button class="secondary active" type="button" data-preview-filter="all">All</button>
+      <button class="secondary" type="button" data-preview-filter="ready">Ready</button>
+      <button class="secondary" type="button" data-preview-filter="duplicate">Duplicate</button>
+      <button class="secondary" type="button" data-preview-filter="transfer">Transfer</button>
+      <button class="secondary" type="button" data-preview-filter="missing_mapping">Missing mapping</button>
+    </div>
+    <label class="preview-search">
+      <span>Search</span>
+      <input id="preview-search" type="search" placeholder="Payee, memo, account, status, import ID">
+    </label>
+  </div>
   <div class="table-wrap">
     <table>
       <thead>
@@ -140,9 +229,9 @@
           <th>Import ID</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="preview-rows">
         {% for row in job.payload.rows %}
-          <tr>
+          <tr data-preview-row data-status="{{ row.status }}" data-search="{{ row.search_text|default('') }}">
             <td>{{ row.transaction.booking_date }}</td>
             <td>{{ row.ynab_account_name or row.transaction.iban }}</td>
             <td>
@@ -158,6 +247,13 @@
               {% endif %}
               {% if row.transaction.memo %}
                 <span class="muted block">{{ row.transaction.memo }}</span>
+              {% endif %}
+              {% if row.duplicate_match %}
+                <span class="muted block">
+                  Duplicate: {{ row.duplicate_match.match_type }} matched {{ row.duplicate_match.matched_import_id }}
+                  {% if row.duplicate_match.existing_date %} on {{ row.duplicate_match.existing_date }}{% endif %}
+                  {% if row.duplicate_match.existing_amount %} for {{ row.duplicate_match.existing_amount|money }}{% endif %}
+                </span>
               {% endif %}
             </td>
             <td class="right amount {% if row.transaction.amount|string|first == '-' %}negative{% else %}positive{% endif %}">{{ row.transaction.amount|money }}</td>

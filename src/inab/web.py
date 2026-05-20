@@ -26,6 +26,8 @@ from .transfers import detect_transfer_pairs
 from .ynab_api import OfficialYnabGateway, YnabAccount, YnabCategory, YnabError, YnabGateway, YnabPayee
 
 GatewayFactory = Callable[[Settings], YnabGateway]
+STALE_UNCOMMITTED_IMPORT_DAYS = 7
+UNUSUAL_TRANSACTION_AMOUNT = Decimal("10000")
 
 PACKAGE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
@@ -85,6 +87,7 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse, dependencies=[Depends(_require_auth)])
     async def index(request: Request) -> Any:
+        store.prune_stale_uncommitted_jobs(older_than_days=STALE_UNCOMMITTED_IMPORT_DAYS)
         selected_plan_id, selected_plan_name = store.selected_plan()
         accounts: list[YnabAccount] = []
         account_error = None
@@ -271,12 +274,26 @@ def create_app(
         job_id = store.create_job(filename=filename, status=status, plan_id=plan_id, payload=payload)
         return _redirect(request, f"/imports/{job_id}")
 
+    @app.get("/imports", response_class=HTMLResponse, dependencies=[Depends(_require_auth)])
+    async def import_history(request: Request) -> Any:
+        pruned_count = store.prune_stale_uncommitted_jobs(older_than_days=STALE_UNCOMMITTED_IMPORT_DAYS)
+        jobs = [_history_job_view(job) for job in store.list_jobs()]
+        return _render(
+            request,
+            "history.html",
+            {
+                "jobs": jobs,
+                "pruned_count": pruned_count,
+                "stale_days": STALE_UNCOMMITTED_IMPORT_DAYS,
+            },
+        )
+
     @app.get("/imports/{job_id}", response_class=HTMLResponse, dependencies=[Depends(_require_auth)])
     async def import_preview(request: Request, job_id: str) -> Any:
         job = store.get_job(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Import job not found.")
-        return _render(request, "preview.html", {"job": job})
+        return _render(request, "preview.html", {"job": job, "can_undo": _can_undo_job(job)})
 
     @app.post("/imports/{job_id}/ignored-ibans", dependencies=[Depends(_require_auth)])
     async def ignore_import_ibans(request: Request, job_id: str) -> Any:
@@ -375,6 +392,15 @@ def create_app(
             settings=settings,
             gateway_factory=gateway_factory,
         )
+        store.update_job(job_id, status=status, result=result)
+        return _redirect(request, f"/imports/{job_id}")
+
+    @app.post("/imports/{job_id}/undo", dependencies=[Depends(_require_auth)])
+    async def undo_import(request: Request, job_id: str) -> Any:
+        job = store.get_job(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Import job not found.")
+        result, status = _undo_import_job(job, settings=settings, gateway_factory=gateway_factory)
         store.update_job(job_id, status=status, result=result)
         return _redirect(request, f"/imports/{job_id}")
 
@@ -813,10 +839,10 @@ def _build_preview_payload(
     if missing_ibans:
         errors.append("Every IBAN in the upload must be mapped before import.")
 
-    duplicate_keys: set[tuple[str, str]] = set()
+    duplicate_matches: dict[tuple[str, str], dict[str, Any]] = {}
     if plan_id and settings.ynab_configured and mappings:
         try:
-            duplicate_keys = _existing_duplicate_keys(parsed.transactions, mappings=mappings, gateway=gateway_factory(settings), plan_id=plan_id)
+            duplicate_matches = _existing_duplicate_matches(parsed.transactions, mappings=mappings, gateway=gateway_factory(settings), plan_id=plan_id)
         except YnabError as exc:
             errors.append(str(exc))
 
@@ -830,9 +856,9 @@ def _build_preview_payload(
         credit_mapping = mappings.get(pair.target_iban)
         if not debit_mapping or not credit_mapping:
             continue
-        if (debit_mapping.ynab_account_id, pair.debit_import_id) in duplicate_keys:
+        if (debit_mapping.ynab_account_id, pair.debit_import_id) in duplicate_matches:
             continue
-        if (credit_mapping.ynab_account_id, pair.credit_import_id) in duplicate_keys:
+        if (credit_mapping.ynab_account_id, pair.credit_import_id) in duplicate_matches:
             continue
         transfer_by_import_id[pair.debit_import_id] = (pair.id, "debit")
         transfer_by_import_id[pair.credit_import_id] = (pair.id, "credit")
@@ -840,7 +866,8 @@ def _build_preview_payload(
     rows = []
     for tx in _preview_transactions(parsed.transactions):
         mapping = mappings.get(tx.iban)
-        duplicate = bool(mapping and (mapping.ynab_account_id, tx.import_id) in duplicate_keys)
+        duplicate_match = duplicate_matches.get((mapping.ynab_account_id, tx.import_id)) if mapping else None
+        duplicate = bool(duplicate_match)
         transfer_marker = transfer_by_import_id.get(tx.import_id)
         rows.append(
             {
@@ -848,9 +875,11 @@ def _build_preview_payload(
                 "ynab_account_id": mapping.ynab_account_id if mapping else None,
                 "ynab_account_name": mapping.ynab_account_name if mapping else None,
                 "duplicate": duplicate,
+                "duplicate_match": duplicate_match,
                 "transfer_id": transfer_marker[0] if transfer_marker else None,
                 "transfer_role": transfer_marker[1] if transfer_marker else None,
                 "status": _row_status(mapping=mapping, duplicate=duplicate, transfer_marker=transfer_marker),
+                "search_text": _row_search_text(tx, mapping=mapping, status=_row_status(mapping=mapping, duplicate=duplicate, transfer_marker=transfer_marker)),
             }
         )
 
@@ -863,8 +892,8 @@ def _build_preview_payload(
         target_mapping = mappings.get(pair.target_iban)
         if not source_mapping or not target_mapping:
             continue
-        debit_duplicate = (source_mapping.ynab_account_id, debit_tx.import_id) in duplicate_keys
-        credit_duplicate = (target_mapping.ynab_account_id, credit_tx.import_id) in duplicate_keys
+        debit_duplicate = (source_mapping.ynab_account_id, debit_tx.import_id) in duplicate_matches
+        credit_duplicate = (target_mapping.ynab_account_id, credit_tx.import_id) in duplicate_matches
         if debit_duplicate or credit_duplicate:
             continue
         transfers.append(
@@ -884,7 +913,10 @@ def _build_preview_payload(
         statement_mapping = mappings.get(statement.iban)
         statement_data = statement.to_dict()
         statement_data["ynab_account_name"] = statement_mapping.ynab_account_name if statement_mapping else None
+        statement_data["reconciliation"] = _statement_reconciliation(statement)
         statements.append(statement_data)
+    summary = _preview_summary(rows, transfers)
+    warnings = _preview_warnings(rows=rows, statements=statements, missing_ibans=missing_ibans, summary=summary)
     payload = {
         "filename": filename,
         "selected_plan_id": plan_id,
@@ -901,6 +933,8 @@ def _build_preview_payload(
         "duplicate_count": sum(1 for row in rows if row["duplicate"]),
         "ready_count": sum(1 for row in rows if row["status"] in {"ready", "transfer"}),
         "transaction_count": len(rows),
+        "summary": summary,
+        "warnings": warnings,
         "skipped_entries": parsed.skipped_entries,
     }
     return payload, "blocked" if errors else "preview"
@@ -925,20 +959,115 @@ def _row_status(
     return "ready"
 
 
-def _existing_duplicate_keys(
+def _row_search_text(tx: BankTransaction, *, mapping: AccountMapping | None, status: str) -> str:
+    parts = [
+        tx.booking_date.isoformat(),
+        mapping.ynab_account_name if mapping else tx.iban,
+        tx.payee,
+        tx.original_payee,
+        tx.memo,
+        tx.category_name,
+        tx.applied_rule_name,
+        tx.import_id,
+        status,
+    ]
+    return " ".join(str(part).casefold() for part in parts if part)
+
+
+def _statement_reconciliation(statement: Any) -> dict[str, Any]:
+    opening = statement.opening_balance.signed_amount if statement.opening_balance else None
+    actual = statement.closing_balance.signed_amount if statement.closing_balance else None
+    movement = statement.movement_total
+    expected = opening + movement if opening is not None else None
+    delta = actual - expected if actual is not None and expected is not None else None
+    return {
+        "opening": _decimal_string(opening),
+        "movement": _decimal_string(movement),
+        "expected_closing": _decimal_string(expected),
+        "actual_closing": _decimal_string(actual),
+        "delta": _decimal_string(delta),
+        "status": "reconciled" if statement.balances_reconcile is True else "mismatch" if statement.balances_reconcile is False else "missing",
+    }
+
+
+def _preview_summary(rows: list[dict[str, Any]], transfers: list[dict[str, Any]]) -> dict[str, Any]:
+    importable_rows = [row for row in rows if row["status"] in {"ready", "transfer"}]
+    amounts = [Decimal(str(row["transaction"]["amount"])) for row in importable_rows]
+    inflow = sum((amount for amount in amounts if amount > 0), Decimal("0"))
+    outflow = sum((amount for amount in amounts if amount < 0), Decimal("0"))
+    net = sum(amounts, Decimal("0"))
+    return {
+        "account_count": len({row["ynab_account_id"] for row in importable_rows if row["ynab_account_id"]}),
+        "ready_count": sum(1 for row in rows if row["status"] in {"ready", "transfer"}),
+        "duplicate_count": sum(1 for row in rows if row["duplicate"]),
+        "transfer_count": len(transfers),
+        "assigned_category_count": sum(1 for row in importable_rows if row["transaction"].get("category_id")),
+        "inflow_total": _decimal_string(inflow),
+        "outflow_total": _decimal_string(outflow),
+        "net_total": _decimal_string(net),
+    }
+
+
+def _preview_warnings(
+    *,
+    rows: list[dict[str, Any]],
+    statements: list[dict[str, Any]],
+    missing_ibans: list[str],
+    summary: dict[str, Any],
+) -> list[str]:
+    warnings: list[str] = []
+    for statement in statements:
+        reconciliation = statement.get("reconciliation") or {}
+        if reconciliation.get("status") == "mismatch":
+            account = statement.get("ynab_account_name") or statement.get("iban")
+            warnings.append(
+                "Balance mismatch for "
+                f"{account}: expected closing {format_money(reconciliation.get('expected_closing'))}, "
+                f"actual {format_money(reconciliation.get('actual_closing'))}, "
+                f"delta {format_money(reconciliation.get('delta'))}."
+            )
+    if missing_ibans:
+        warnings.append(f"Missing mappings for {', '.join(missing_ibans)}.")
+    if rows and int(summary["ready_count"]) == 0:
+        warnings.append("This import has zero ready rows.")
+    for row in rows:
+        if row["status"] not in {"ready", "transfer"}:
+            continue
+        amount = Decimal(str(row["transaction"]["amount"]))
+        if abs(amount) >= UNUSUAL_TRANSACTION_AMOUNT:
+            warnings.append(
+                f"Unusually large transaction: {row['transaction']['booking_date']} "
+                f"{row['transaction']['payee']} {format_money(amount)}."
+            )
+    return warnings
+
+
+def _decimal_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _milliunits_to_amount_string(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return str((Decimal(value) / Decimal("1000")).quantize(Decimal("0.001")))
+
+
+def _existing_duplicate_matches(
     transactions: list[BankTransaction],
     *,
     mappings: dict[str, AccountMapping],
     gateway: YnabGateway,
     plan_id: str,
-) -> set[tuple[str, str]]:
+) -> dict[tuple[str, str], dict[str, Any]]:
     txs_by_account: dict[str, list[BankTransaction]] = defaultdict(list)
     for tx in transactions:
         mapping = mappings.get(tx.iban)
         if mapping:
             txs_by_account[mapping.ynab_account_id].append(tx)
 
-    duplicates: set[tuple[str, str]] = set()
+    duplicates: dict[tuple[str, str], dict[str, Any]] = {}
     for account_id, account_transactions in txs_by_account.items():
         since_date = min(tx.booking_date for tx in account_transactions)
         existing_transactions = gateway.existing_transactions(plan_id, account_id, since_date)
@@ -955,22 +1084,64 @@ def _existing_duplicate_keys(
             for alias in tx.legacy_exact_import_ids
         )
         for tx in account_transactions:
-            if tx.import_id in existing_by_import_id or any(import_id in existing_by_import_id for import_id in tx.legacy_import_ids):
-                duplicates.add((account_id, tx.import_id))
+            existing = existing_by_import_id.get(tx.import_id)
+            if existing:
+                duplicates[(account_id, tx.import_id)] = _duplicate_match(
+                    account_id=account_id,
+                    uploaded_import_id=tx.import_id,
+                    matched_import_id=tx.import_id,
+                    match_type="import_id",
+                    existing=existing,
+                )
                 continue
-            if any(
-                _legacy_exact_match(
-                    existing_by_import_id.get(import_id),
+            legacy_import_id = next((import_id for import_id in tx.legacy_import_ids if import_id in existing_by_import_id), None)
+            if legacy_import_id:
+                duplicates[(account_id, tx.import_id)] = _duplicate_match(
+                    account_id=account_id,
+                    uploaded_import_id=tx.import_id,
+                    matched_import_id=legacy_import_id,
+                    match_type="legacy_import_id",
+                    existing=existing_by_import_id[legacy_import_id],
+                )
+                continue
+            for import_id in tx.legacy_exact_import_ids:
+                existing = existing_by_import_id.get(import_id)
+                if _legacy_exact_match(
+                    existing,
                     tx,
                     import_id=import_id,
                     exact_alias_counts=exact_alias_counts,
                     exact_alias_date_counts=exact_alias_date_counts,
                     exact_alias_amount_counts=exact_alias_amount_counts,
-                )
-                for import_id in tx.legacy_exact_import_ids
-            ):
-                duplicates.add((account_id, tx.import_id))
+                ):
+                    duplicates[(account_id, tx.import_id)] = _duplicate_match(
+                        account_id=account_id,
+                        uploaded_import_id=tx.import_id,
+                        matched_import_id=import_id,
+                        match_type="legacy_exact_import_id",
+                        existing=existing,
+                    )
+                    break
     return duplicates
+
+
+def _duplicate_match(
+    *,
+    account_id: str,
+    uploaded_import_id: str,
+    matched_import_id: str,
+    match_type: str,
+    existing: Any,
+) -> dict[str, Any]:
+    return {
+        "account_id": account_id,
+        "uploaded_import_id": uploaded_import_id,
+        "matched_import_id": matched_import_id,
+        "match_type": match_type,
+        "existing_date": existing.date.isoformat() if getattr(existing, "date", None) else None,
+        "existing_amount_milliunits": existing.amount,
+        "existing_amount": _milliunits_to_amount_string(existing.amount),
+    }
 
 
 def _legacy_exact_match(
@@ -1025,7 +1196,7 @@ def _import_job(
 
     try:
         gateway = gateway_factory(settings)
-        duplicate_keys = _existing_duplicate_keys(parsed.transactions, mappings=mappings, gateway=gateway, plan_id=plan_id)
+        duplicate_matches = _existing_duplicate_matches(parsed.transactions, mappings=mappings, gateway=gateway, plan_id=plan_id)
     except YnabError as exc:
         return {"errors": [str(exc)], "created_count": 0}, "failed"
 
@@ -1042,10 +1213,10 @@ def _import_job(
         credit = tx_by_import_id[transfer["credit_import_id"]]
         source_mapping = mappings[debit.iban]
         target_mapping = mappings[credit.iban]
-        if (source_mapping.ynab_account_id, debit.import_id) in duplicate_keys or (
+        if (source_mapping.ynab_account_id, debit.import_id) in duplicate_matches or (
             target_mapping.ynab_account_id,
             credit.import_id,
-        ) in duplicate_keys:
+        ) in duplicate_matches:
             skipped_transfer_duplicates.extend([debit.import_id, credit.import_id])
             consumed_import_ids.update({debit.import_id, credit.import_id})
             continue
@@ -1066,7 +1237,7 @@ def _import_job(
         if tx.import_id in consumed_import_ids:
             continue
         mapping = mappings[tx.iban]
-        if (mapping.ynab_account_id, tx.import_id) in duplicate_keys:
+        if (mapping.ynab_account_id, tx.import_id) in duplicate_matches:
             skipped_duplicates.append(tx.import_id)
             continue
         normal_payloads.append(tx.to_ynab_payload(account_id=mapping.ynab_account_id))
@@ -1096,6 +1267,94 @@ def _import_job(
         "transfer_count": len(transfer_payloads),
     }
     return result, "imported"
+
+
+def _history_job_view(job: dict[str, Any]) -> dict[str, Any]:
+    payload = job.get("payload") or {}
+    result = job.get("result") or {}
+    return {
+        "id": job["id"],
+        "filename": job["filename"],
+        "status": job["status"],
+        "created_at": job["created_at"],
+        "updated_at": job["updated_at"],
+        "transaction_count": payload.get("transaction_count") or 0,
+        "ready_count": payload.get("ready_count") or 0,
+        "duplicate_count": payload.get("duplicate_count") or 0,
+        "transfer_count": len(payload.get("transfers") or []),
+        "created_count": result.get("created_count") or len(result.get("transaction_ids") or []),
+        "can_undo": _can_undo_job(job),
+    }
+
+
+def _can_undo_job(job: dict[str, Any]) -> bool:
+    return job.get("status") == "imported" and bool(_job_created_transaction_ids(job))
+
+
+def _job_created_transaction_ids(job: dict[str, Any]) -> list[str]:
+    result = job.get("result") or {}
+    transaction_ids = result.get("transaction_ids")
+    if not isinstance(transaction_ids, list):
+        return []
+    return [str(transaction_id) for transaction_id in transaction_ids if str(transaction_id)]
+
+
+def _undo_import_job(
+    job: dict[str, Any],
+    *,
+    settings: Settings,
+    gateway_factory: GatewayFactory,
+) -> tuple[dict[str, Any], str]:
+    result = dict(job.get("result") or {})
+    transaction_ids = _job_created_transaction_ids(job)
+    if job.get("status") == "reverted":
+        result["undo"] = {
+            "attempted_transaction_ids": [],
+            "deleted_transaction_ids": [],
+            "errors": ["Import has already been reverted."],
+        }
+        return result, "reverted"
+    if not transaction_ids:
+        result["undo"] = {
+            "attempted_transaction_ids": [],
+            "deleted_transaction_ids": [],
+            "errors": ["No created YNAB transaction IDs are available to undo."],
+        }
+        return result, job.get("status") or "failed"
+    plan_id = job.get("plan_id")
+    if not plan_id:
+        result["undo"] = {
+            "attempted_transaction_ids": transaction_ids,
+            "deleted_transaction_ids": [],
+            "errors": ["No YNAB plan is associated with this import."],
+        }
+        return result, "imported"
+
+    deleted_transaction_ids: list[str] = []
+    errors: list[str] = []
+    try:
+        gateway = gateway_factory(settings)
+    except YnabError as exc:
+        result["undo"] = {
+            "attempted_transaction_ids": transaction_ids,
+            "deleted_transaction_ids": [],
+            "errors": [str(exc)],
+        }
+        return result, "imported"
+
+    for transaction_id in transaction_ids:
+        try:
+            gateway.delete_transaction(plan_id, transaction_id)
+            deleted_transaction_ids.append(transaction_id)
+        except YnabError as exc:
+            errors.append(f"{transaction_id}: {exc}")
+
+    result["undo"] = {
+        "attempted_transaction_ids": transaction_ids,
+        "deleted_transaction_ids": deleted_transaction_ids,
+        "errors": errors,
+    }
+    return result, "reverted" if not errors else "imported"
 
 
 def main() -> None:

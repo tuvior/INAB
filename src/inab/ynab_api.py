@@ -74,6 +74,9 @@ class YnabGateway(Protocol):
     def create_transactions(self, plan_id: str, transactions: list[dict[str, Any]]) -> CreateTransactionsResult:
         ...
 
+    def delete_transaction(self, plan_id: str, transaction_id: str) -> None:
+        ...
+
 
 class OfficialYnabGateway:
     def __init__(self, access_token: str):
@@ -190,6 +193,14 @@ class OfficialYnabGateway:
             transaction_ids=list(getattr(data, "transaction_ids", []) or []),
             duplicate_import_ids=list(getattr(data, "duplicate_import_ids", []) or []),
         )
+
+    def delete_transaction(self, plan_id: str, transaction_id: str) -> None:
+        ynab = _ynab()
+        try:
+            with ynab.ApiClient(ynab.Configuration(access_token=self.access_token)) as api_client:
+                ynab.TransactionsApi(api_client).delete_transaction(plan_id, transaction_id)
+        except Exception as exc:
+            raise YnabError(_safe_error("Could not delete YNAB transaction", exc)) from exc
 
 
 def _ynab() -> Any:
