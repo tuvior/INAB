@@ -405,6 +405,52 @@ def test_import_accepts_transfer_and_skips_counterpart(app_client: tuple[TestCli
     assert updated_job["result"]["skipped_transfer_counterparts"] == ["INAB:REF-C"]
 
 
+def test_import_page_shows_submitted_and_returned_ynab_transactions(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+    client, store, gateway = app_client
+    login(client)
+    store.save_selected_plan("plan-1", "Household")
+    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    gateway.returned_transaction_ids = ["ynab-1", "ynab-2"]
+    gateway.returned_transactions = [
+        {
+            "id": "ynab-1",
+            "date": "2026-04-10",
+            "amount": "-10.000",
+            "account_name": "Checking",
+            "payee_name": "Payee",
+            "import_id": "INAB:REF1",
+            "matched_transaction_id": "manual-1",
+        },
+        {
+            "id": "ynab-2",
+            "date": "2026-04-10",
+            "amount": "-10.000",
+            "account_name": "Checking",
+            "payee_name": "Payee",
+            "import_id": "INAB:REF1",
+        },
+    ]
+    content = camt_document(statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Payee"), opening="100.00", closing="90.00"))
+
+    upload = client.post("/uploads", files={"file": ("test.xml", content, "application/xml")}, follow_redirects=False)
+    job_id = upload.headers["location"].rsplit("/", 1)[1]
+    imported = client.post(f"/imports/{job_id}", follow_redirects=True)
+
+    assert imported.status_code == 200
+    assert "Submitted 1 bank row to YNAB. YNAB returned 2 saved transaction IDs." in imported.text
+    assert "Import result" in imported.text
+    assert "Matched existing" in imported.text
+    assert "Bank rows submitted by INAB" in imported.text
+    assert "Transactions returned by YNAB" in imported.text
+    assert "Matched existing transaction: manual-1" in imported.text
+    assert "INAB:REF1" in imported.text
+    job = store.get_job(job_id)
+    assert job is not None
+    assert job["result"]["submitted_transactions"][0]["import_id"] == "INAB:REF1"
+    assert job["result"]["ynab_transactions"][0]["matched_transaction_id"] == "manual-1"
+    assert job["result"]["ynab_matched_count"] == 1
+
+
 def test_empty_statement_iban_does_not_block_preview(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
     client, store, _ = app_client
     login(client)

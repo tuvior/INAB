@@ -1202,6 +1202,7 @@ def _import_job(
 
     tx_by_import_id = {tx.import_id: tx for tx in parsed.transactions}
     transfer_payloads: list[dict[str, Any]] = []
+    submitted_transactions: list[dict[str, Any]] = []
     skipped_transfer_counterparts: list[str] = []
     skipped_transfer_duplicates: list[str] = []
     consumed_import_ids: set[str] = set()
@@ -1222,10 +1223,19 @@ def _import_job(
             continue
         if not target_mapping.transfer_payee_id:
             return {"errors": [f"YNAB account {target_mapping.ynab_account_name} has no transfer payee id."], "created_count": 0}, "failed"
-        transfer_payloads.append(
-            debit.to_ynab_payload(
-                account_id=source_mapping.ynab_account_id,
-                transfer_payee_id=target_mapping.transfer_payee_id,
+        transfer_payload = debit.to_ynab_payload(
+            account_id=source_mapping.ynab_account_id,
+            transfer_payee_id=target_mapping.transfer_payee_id,
+        )
+        transfer_payloads.append(transfer_payload)
+        submitted_transactions.append(
+            _submitted_transaction_summary(
+                debit,
+                account=source_mapping,
+                kind="transfer",
+                payee_name=f"Transfer to {target_mapping.ynab_account_name}",
+                counterpart_import_id=credit.import_id,
+                counterpart_account_name=target_mapping.ynab_account_name,
             )
         )
         consumed_import_ids.update({debit.import_id, credit.import_id})
@@ -1241,6 +1251,14 @@ def _import_job(
             skipped_duplicates.append(tx.import_id)
             continue
         normal_payloads.append(tx.to_ynab_payload(account_id=mapping.ynab_account_id))
+        submitted_transactions.append(
+            _submitted_transaction_summary(
+                tx,
+                account=mapping,
+                kind="transaction",
+                payee_name=tx.payee,
+            )
+        )
 
     transactions_to_create = transfer_payloads + normal_payloads
     try:
@@ -1259,6 +1277,10 @@ def _import_job(
         "attempted_count": len(transactions_to_create),
         "created_count": len(create_result.transaction_ids),
         "transaction_ids": create_result.transaction_ids,
+        "submitted_transactions": submitted_transactions,
+        "ynab_transactions": create_result.transactions,
+        "ynab_matched_count": sum(1 for tx in create_result.transactions if tx.get("matched_transaction_id")),
+        "ynab_transfer_counterpart_count": sum(1 for tx in create_result.transactions if tx.get("transfer_transaction_id")),
         "ynab_duplicate_import_ids": create_result.duplicate_import_ids,
         "skipped_duplicates": sorted(set(skipped_duplicates + skipped_transfer_duplicates)),
         "skipped_transfer_counterparts": skipped_transfer_counterparts,
@@ -1267,6 +1289,29 @@ def _import_job(
         "transfer_count": len(transfer_payloads),
     }
     return result, "imported"
+
+
+def _submitted_transaction_summary(
+    tx: BankTransaction,
+    *,
+    account: AccountMapping,
+    kind: str,
+    payee_name: str,
+    counterpart_import_id: str | None = None,
+    counterpart_account_name: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "date": tx.booking_date.isoformat(),
+        "account_id": account.ynab_account_id,
+        "account_name": account.ynab_account_name,
+        "payee_name": payee_name,
+        "amount": str(tx.amount),
+        "import_id": tx.import_id,
+        "category_name": tx.category_name,
+        "counterpart_import_id": counterpart_import_id,
+        "counterpart_account_name": counterpart_account_name,
+    }
 
 
 def _history_job_view(job: dict[str, Any]) -> dict[str, Any]:

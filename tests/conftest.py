@@ -117,6 +117,8 @@ class FakeGateway:
         self.existing_transactions_by_account: dict[tuple[str, str], list[ExistingTransaction]] = {}
         self.existing_calls: list[tuple[str, str, date | None]] = []
         self.created: list[dict[str, Any]] = []
+        self.returned_transaction_ids: list[str] = []
+        self.returned_transactions: list[dict[str, Any]] = []
         self.deleted: list[tuple[str, str]] = []
         self.delete_errors: dict[str, str] = {}
 
@@ -144,7 +146,8 @@ class FakeGateway:
 
     def create_transactions(self, plan_id: str, transactions: list[dict[str, Any]]) -> CreateTransactionsResult:
         self.created.extend(transactions)
-        return CreateTransactionsResult(transaction_ids=[f"ynab-{i}" for i, _ in enumerate(transactions, start=1)], duplicate_import_ids=[])
+        transaction_ids = self.returned_transaction_ids or [f"ynab-{i}" for i, _ in enumerate(transactions, start=1)]
+        return CreateTransactionsResult(transaction_ids=transaction_ids, duplicate_import_ids=[], transactions=self.returned_transactions)
 
     def delete_transaction(self, plan_id: str, transaction_id: str) -> None:
         if transaction_id in self.delete_errors:

@@ -596,6 +596,15 @@ tr:last-child td {
   font-size: 18px;
 }
 
+.result-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.result-table-heading {
+  margin-top: 18px;
+}
+
 .warning-panel {
   border-color: #f6d58d;
 }

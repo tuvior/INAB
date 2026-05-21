@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal
 from typing import Any, Protocol
 
 
@@ -46,6 +47,7 @@ class YnabPayee:
 class CreateTransactionsResult:
     transaction_ids: list[str]
     duplicate_import_ids: list[str]
+    transactions: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -192,6 +194,13 @@ class OfficialYnabGateway:
         return CreateTransactionsResult(
             transaction_ids=list(getattr(data, "transaction_ids", []) or []),
             duplicate_import_ids=list(getattr(data, "duplicate_import_ids", []) or []),
+            transactions=[
+                _saved_transaction_summary(transaction)
+                for transaction in [
+                    *([getattr(data, "transaction")] if getattr(data, "transaction", None) else []),
+                    *(getattr(data, "transactions", []) or []),
+                ]
+            ],
         )
 
     def delete_transaction(self, plan_id: str, transaction_id: str) -> None:
@@ -238,6 +247,35 @@ def _transaction_amount(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _saved_transaction_summary(transaction: Any) -> dict[str, Any]:
+    amount = _transaction_amount(_get_field(transaction, "amount"))
+    transaction_date = _transaction_date(_get_field(transaction, "date") or _get_field(transaction, "var_date"))
+    return {
+        "id": _optional_str(_get_field(transaction, "id")),
+        "date": transaction_date.isoformat() if transaction_date else None,
+        "amount": _milliunits_to_amount_string(amount),
+        "account_id": _optional_str(_get_field(transaction, "account_id")),
+        "account_name": _optional_str(_get_field(transaction, "account_name")),
+        "payee_name": _optional_str(_get_field(transaction, "payee_name")),
+        "category_name": _optional_str(_get_field(transaction, "category_name")),
+        "import_id": _optional_str(_get_field(transaction, "import_id")),
+        "matched_transaction_id": _optional_str(_get_field(transaction, "matched_transaction_id")),
+        "transfer_transaction_id": _optional_str(_get_field(transaction, "transfer_transaction_id")),
+    }
+
+
+def _get_field(value: Any, field: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(field)
+    return getattr(value, field, None)
+
+
+def _milliunits_to_amount_string(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return str((Decimal(value) / Decimal("1000")).quantize(Decimal("0.001")))
 
 
 def _safe_error(message: str, exc: Exception) -> str:

@@ -17,6 +17,10 @@
 {% endfor %}
 
 {% if job.result %}
+  {% set result_attempted_count = job.result.attempted_count|default(job.result.created_count, true) %}
+  {% set result_transaction_ids = job.result.transaction_ids|default([], true) %}
+  {% set result_skipped_duplicates = job.result.skipped_duplicates|default([], true) %}
+  {% set result_skipped_transfer_counterparts = job.result.skipped_transfer_counterparts|default([], true) %}
   {% if job.result.undo %}
     {% if job.result.undo.errors %}
       <div class="alert alert-error">
@@ -37,9 +41,122 @@
     {% endfor %}
   {% else %}
     <div class="alert alert-ok">
-      Created {{ job.result.created_count }} transactions. Skipped {{ job.result.skipped_duplicates|length }} duplicates and {{ job.result.skipped_transfer_counterparts|length }} transfer counterparts.
+      Submitted {{ result_attempted_count }} bank row{% if result_attempted_count != 1 %}s{% endif %} to YNAB. YNAB returned {{ result_transaction_ids|length }} saved transaction ID{% if result_transaction_ids|length != 1 %}s{% endif %}. Skipped {{ result_skipped_duplicates|length }} duplicate{% if result_skipped_duplicates|length != 1 %}s{% endif %} and {{ result_skipped_transfer_counterparts|length }} opposite-side transfer row{% if result_skipped_transfer_counterparts|length != 1 %}s{% endif %}.
     </div>
   {% endif %}
+{% endif %}
+
+{% if job.result and not job.result.errors and (job.result.submitted_transactions or job.result.transaction_ids) %}
+  <section class="panel">
+    <div class="panel-heading">
+      <div>
+        <h2>Import result</h2>
+        <p class="muted">YNAB saved IDs can include imported rows, matched existing transactions, and transfer counterparts.</p>
+      </div>
+    </div>
+    <div class="summary-grid result-summary-grid">
+      <div><span class="muted">Bank rows submitted</span><strong>{{ result_attempted_count }}</strong></div>
+      <div><span class="muted">YNAB saved IDs</span><strong>{{ result_transaction_ids|length }}</strong></div>
+      <div><span class="muted">Matched existing</span><strong>{{ job.result.ynab_matched_count|default(0, true) }}</strong></div>
+      <div><span class="muted">YNAB transfer counterparts</span><strong>{{ job.result.ynab_transfer_counterpart_count|default(0, true) }}</strong></div>
+      <div><span class="muted">Duplicates skipped</span><strong>{{ result_skipped_duplicates|length }}</strong></div>
+      <div><span class="muted">Transfer rows skipped</span><strong>{{ result_skipped_transfer_counterparts|length }}</strong></div>
+    </div>
+    {% if job.result.submitted_transactions %}
+      <h3 class="result-table-heading">Bank rows submitted by INAB</h3>
+      <div class="table-wrap mobile-card-wrap">
+        <table class="mobile-card-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Account</th>
+              <th>Payee</th>
+              <th class="right">Amount</th>
+              <th>Import ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in job.result.submitted_transactions %}
+              <tr>
+                <td data-label="Date">{{ row.date }}</td>
+                <td data-label="Account">{{ row.account_name }}</td>
+                <td data-label="Payee">
+                  {{ row.payee_name }}
+                  {% if row.counterpart_account_name %}
+                    <span class="muted block">Counterpart: {{ row.counterpart_account_name }}</span>
+                  {% endif %}
+                  {% if row.category_name %}
+                    <span class="muted block">Category: {{ row.category_name }}</span>
+                  {% endif %}
+                </td>
+                <td class="right amount {% if row.amount|string|first == '-' %}negative{% else %}positive{% endif %}" data-label="Amount">{{ row.amount|money }}</td>
+                <td class="mono" data-label="Import ID">{{ row.import_id }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+    {% if job.result.ynab_transactions %}
+      <h3 class="result-table-heading">Transactions returned by YNAB</h3>
+      <div class="table-wrap mobile-card-wrap">
+        <table class="mobile-card-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Account</th>
+              <th>Payee</th>
+              <th class="right">Amount</th>
+              <th>Import ID</th>
+              <th>YNAB ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in job.result.ynab_transactions %}
+              <tr>
+                <td data-label="Date">{{ row.date or "" }}</td>
+                <td data-label="Account">{{ row.account_name or row.account_id }}</td>
+                <td data-label="Payee">
+                  {{ row.payee_name or "" }}
+                  {% if row.matched_transaction_id %}
+                    <span class="muted block">Matched existing transaction: {{ row.matched_transaction_id }}</span>
+                  {% endif %}
+                  {% if row.transfer_transaction_id %}
+                    <span class="muted block">YNAB transfer counterpart: {{ row.transfer_transaction_id }}</span>
+                  {% endif %}
+                  {% if row.category_name %}
+                    <span class="muted block">Category: {{ row.category_name }}</span>
+                  {% endif %}
+                </td>
+                <td class="right amount {% if row.amount|string|first == '-' %}negative{% else %}positive{% endif %}" data-label="Amount">{% if row.amount %}{{ row.amount|money }}{% endif %}</td>
+                <td class="mono" data-label="Import ID">{{ row.import_id or "" }}</td>
+                <td class="mono" data-label="YNAB ID">{{ row.id }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <h3 class="result-table-heading">Saved IDs returned by YNAB</h3>
+      <p class="muted">Transaction details were not available in this response.</p>
+      <div class="table-wrap mobile-card-wrap">
+        <table class="mobile-card-table">
+          <thead>
+            <tr>
+              <th>YNAB ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for transaction_id in job.result.transaction_ids %}
+              <tr>
+                <td class="mono" data-label="YNAB ID">{{ transaction_id }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </section>
 {% endif %}
 
 {% if can_undo %}
