@@ -65,7 +65,7 @@
     {% if job.result.submitted_transactions %}
       <h3 class="result-table-heading">Bank rows submitted by INAB</h3>
       <div class="table-wrap mobile-card-wrap">
-        <table class="mobile-card-table">
+        <table class="mobile-card-table transaction-table">
           <thead>
             <tr>
               <th>Date</th>
@@ -100,7 +100,7 @@
     {% if job.result.ynab_transactions %}
       <h3 class="result-table-heading">Transactions returned by YNAB</h3>
       <div class="table-wrap mobile-card-wrap">
-        <table class="mobile-card-table">
+        <table class="mobile-card-table transaction-table">
           <thead>
             <tr>
               <th>Date</th>
@@ -201,9 +201,9 @@
 {% if job.payload.statements %}
 <section class="status-grid">
   <div class="panel">
-    <h2>Transactions</h2>
-    <p class="metric">{{ job.payload.transaction_count }}</p>
-    <p class="muted">{{ job.payload.ready_count }} ready, {{ job.payload.duplicate_count }} duplicates</p>
+    <h2>Ready transactions</h2>
+    <p class="metric">{{ job.payload.ready_count }}</p>
+    <p class="muted">{{ job.payload.transaction_count }} total, {{ job.payload.duplicate_count }} duplicates</p>
   </div>
   <div class="panel">
     <h2>Accounts</h2>
@@ -335,7 +335,7 @@
     </label>
   </div>
   <div class="table-wrap mobile-card-wrap">
-    <table class="mobile-card-table">
+    <table class="mobile-card-table transaction-table">
       <thead>
         <tr>
           <th>Date</th>
@@ -352,22 +352,22 @@
             <td data-label="Date">{{ row.transaction.booking_date }}</td>
             <td data-label="Account">{{ row.ynab_account_name or row.transaction.iban }}</td>
             <td data-label="Payee">
-              {{ row.transaction.payee }}
+              <span class="payee-primary">{{ row.transaction.payee }}</span>
               {% if row.transaction.original_payee %}
-                <span class="muted block">Original payee: {{ row.transaction.original_payee }}</span>
+                <span class="muted block transaction-detail">Original payee: {{ row.transaction.original_payee }}</span>
               {% endif %}
               {% if row.transaction.category_name %}
-                <span class="muted block">Category: {{ row.transaction.category_name }}</span>
+                <span class="muted block transaction-detail">Category: {{ row.transaction.category_name }}</span>
               {% endif %}
               {% if row.transaction.applied_rule_name %}
-                <span class="muted block">Rule: {{ row.transaction.applied_rule_name }}</span>
+                <span class="muted block transaction-detail">Rule: {{ row.transaction.applied_rule_name }}</span>
               {% endif %}
               {% if row.transaction.memo %}
-                <span class="muted block">{{ row.transaction.memo }}</span>
+                <span class="muted block transaction-detail">{{ row.transaction.memo }}</span>
               {% endif %}
               {% if row.duplicate_match %}
-                <span class="muted block">
-                  Duplicate: {{ row.duplicate_match.match_type }} matched {{ row.duplicate_match.matched_import_id }}
+                <span class="duplicate-match" title="{{ row.duplicate_match.match_type }} matched {{ row.duplicate_match.matched_import_id }}">
+                  Already imported
                   {% if row.duplicate_match.existing_date %} on {{ row.duplicate_match.existing_date }}{% endif %}
                   {% if row.duplicate_match.existing_amount %} for {{ row.duplicate_match.existing_amount|money }}{% endif %}
                 </span>
@@ -375,7 +375,7 @@
             </td>
             <td class="right amount {% if row.transaction.amount|string|first == '-' %}negative{% else %}positive{% endif %}" data-label="Amount">{{ row.transaction.amount|money }}</td>
             <td data-label="Status"><span class="chip chip-{{ row.status }}">{{ row.status }}</span></td>
-            <td class="mono" data-label="Import ID">{{ row.transaction.import_id }}</td>
+            <td class="mono" data-label="Import ID" title="{{ row.transaction.import_id }}">{{ row.transaction.import_id[:10] }}{% if row.transaction.import_id|length > 10 %}...{{ row.transaction.import_id[-6:] }}{% endif %}</td>
           </tr>
         {% endfor %}
       </tbody>

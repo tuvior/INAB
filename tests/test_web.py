@@ -246,7 +246,8 @@ def test_upload_preview_marks_existing_import_id_as_duplicate(app_client: tuple[
     assert response.status_code == 200
     assert "duplicate" in response.text
     assert "INAB:REF1" in response.text
-    assert "Duplicate: import_id matched INAB:REF1" in response.text
+    assert "Already imported" in response.text
+    assert 'title="import_id matched INAB:REF1"' in response.text
     assert gateway.existing_calls == [("plan-1", "checking-id", date(2026, 4, 10))]
 
 

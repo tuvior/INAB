@@ -523,6 +523,71 @@ tr:last-child td {
   border-bottom: 0;
 }
 
+.transaction-table tbody tr:nth-child(even) {
+  background: #fbfcfe;
+}
+
+.transaction-table tbody tr:nth-child(even) td {
+  background: #fbfcfe;
+}
+
+.transaction-table tbody tr[data-status="ready"] td:first-child {
+  box-shadow: inset 3px 0 0 #abefc6;
+}
+
+.payee-primary {
+  display: block;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.transaction-detail {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.duplicate-match {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: #eef2f6;
+  color: #667085;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.transaction-table tbody tr[data-status="duplicate"] td {
+  color: #667085;
+}
+
+.transaction-table tbody tr[data-status="duplicate"] .payee-primary {
+  color: #667085;
+  font-weight: 500;
+}
+
+.transaction-table tbody tr[data-status="duplicate"] .muted {
+  color: #8a94a3;
+}
+
+.transaction-table tbody tr[data-status="duplicate"] .mono {
+  color: #667085;
+}
+
+.transaction-table tbody tr[data-status="duplicate"] .amount,
+.transaction-table tbody tr[data-status="duplicate"] .negative,
+.transaction-table tbody tr[data-status="duplicate"] .positive {
+  color: #667085;
+}
+
+.transaction-table tbody tr[data-status="duplicate"] .chip-duplicate {
+  background: #eef2f6;
+  color: #667085;
+}
+
 .right {
   text-align: right;
 }
