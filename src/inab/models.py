@@ -113,6 +113,12 @@ def _strip_card_purchase_details(value: str) -> str:
         value,
         flags=re.IGNORECASE,
     )
+    value = re.sub(
+        r"\s+\d{2}\.\d{2}\.\d{4},\s*\d{2}:\d{2}(?:,.*)?$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
     value = re.sub(r",\s*No carte\b.*$", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+No carte\b.*$", "", value, flags=re.IGNORECASE)
     return value

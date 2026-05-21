@@ -5,6 +5,10 @@ from inab.models import payee_from_description
 
 def test_payee_from_twint_purchase_description() -> None:
     assert payee_from_description("Achat TWINT SBB MOBILE") == "SBB Mobile"
+    assert (
+        payee_from_description("Achat TWINT SBB MOBILE 30.03.2026, 14:45")
+        == "SBB Mobile"
+    )
     assert payee_from_description("Achat TWINT SBB EASYRIDE") == "SBB EasyRide"
     assert payee_from_description("Achat TWINT DIGITEC GALAXUS") == "Digitec Galaxus"
     assert payee_from_description("Achat TWINT PARKINGPAY-TWINT") == "ParkingPay"

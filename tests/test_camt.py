@@ -404,6 +404,69 @@ def test_card_purchase_uses_payment_date_as_transaction_date() -> None:
     assert tx.value_date == date(2026, 1, 19)
 
 
+def test_twint_payment_memo_is_compact_and_single_line() -> None:
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry_xml(
+                "5.80",
+                "DBIT",
+                "TWINTREF",
+                "Achat TWINT SBB MOBILE\n30.03.2026, 14:45",
+                booking_date="2026-03-31",
+                value_date="2026-03-31",
+            ),
+            opening="100.00",
+            closing="94.20",
+        )
+    )
+
+    result = parse_camt(content)
+    tx = result.transactions[0]
+
+    assert tx.payee == "SBB Mobile"
+    assert tx.memo == "TWINT: 30.03.2026 14:45"
+    assert tx.booking_date == date(2026, 3, 30)
+    assert tx.value_date == date(2026, 3, 31)
+
+
+def test_twint_payment_keeps_legacy_bank_date_fallback_import_id() -> None:
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            """
+<Ntry>
+  <Amt Ccy="CHF">5.80</Amt>
+  <CdtDbtInd>DBIT</CdtDbtInd>
+  <RvslInd>false</RvslInd>
+  <Sts><Cd>BOOK</Cd></Sts>
+  <BookgDt><Dt>2026-03-31</Dt></BookgDt>
+  <ValDt><Dt>2026-03-31</Dt></ValDt>
+  <AddtlNtryInf>Achat TWINT SBB MOBILE
+30.03.2026, 14:45</AddtlNtryInf>
+</Ntry>
+""",
+            opening="100.00",
+            closing="94.20",
+        )
+    )
+
+    result = parse_camt(content)
+    tx = result.transactions[0]
+    old_import_id = make_import_id(
+        iban="CH111",
+        source_ref=None,
+        booking_date=date(2026, 3, 31),
+        amount=tx.amount,
+        payee=tx.payee,
+        memo=tx.memo,
+    )
+
+    assert tx.booking_date == date(2026, 3, 30)
+    assert tx.import_id != old_import_id
+    assert tx.legacy_import_ids == [old_import_id]
+
+
 def test_card_purchase_keeps_legacy_bank_date_fallback_import_id() -> None:
     content = camt_document(
         statement_xml(

@@ -63,6 +63,14 @@ CARD_PURCHASE_PATTERN = re.compile(
     r"\s*",
     flags=re.IGNORECASE,
 )
+TWINT_PAYMENT_PATTERN = re.compile(
+    r"(?P<payment_type>Achat|Paiement|Cr[ée]dit)\s+TWINT\s+"
+    r"(?P<merchant>.+?)\s+"
+    r"(?P<date>\d{2}\.\d{2}\.\d{4}),\s*"
+    r"(?P<time>\d{2}:\d{2})(?:,?\s*.*)?"
+    r"\s*",
+    flags=re.IGNORECASE,
+)
 
 
 def parse_upload(
@@ -801,6 +809,9 @@ def _entry_memo(description: str) -> str | None:
     card_memo = _card_purchase_memo(description)
     if card_memo:
         return truncate(card_memo, 500)
+    twint_memo = _twint_payment_memo(description)
+    if twint_memo:
+        return truncate(twint_memo, 500)
     return truncate(description, 500)
 
 
@@ -820,12 +831,28 @@ def _card_purchase_memo(description: str) -> str | None:
 
 
 def _transaction_booking_date(bank_booking_date: date, description: str) -> date:
-    payment_date = _card_payment_date(description)
+    payment_date = _card_payment_date(description) or _twint_payment_date(description)
     return payment_date or bank_booking_date
+
+
+def _twint_payment_memo(description: str) -> str | None:
+    match = TWINT_PAYMENT_PATTERN.fullmatch(normalize_whitespace(description))
+    if not match:
+        return None
+    return f"TWINT: {match.group('date')} {match.group('time')}"
 
 
 def _card_payment_date(description: str) -> date | None:
     match = CARD_PURCHASE_PATTERN.fullmatch(normalize_whitespace(description))
+    return _payment_date_from_match(match)
+
+
+def _twint_payment_date(description: str) -> date | None:
+    match = TWINT_PAYMENT_PATTERN.fullmatch(normalize_whitespace(description))
+    return _payment_date_from_match(match)
+
+
+def _payment_date_from_match(match: re.Match[str] | None) -> date | None:
     if not match:
         return None
     day, month, year = match.group("date").split(".")
