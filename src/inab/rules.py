@@ -92,7 +92,9 @@ def apply_rules(transactions: list[BankTransaction], rules: list[ImportRule]) ->
                 break
 
 
-def evaluate_transaction(payee: str, memo: str | None, rules: list[ImportRule]) -> RuleEvaluation:
+def evaluate_transaction(
+    payee: str, memo: str | None, rules: list[ImportRule]
+) -> RuleEvaluation:
     tx = BankTransaction(
         uid="rule-test",
         statement_id="rule-test",

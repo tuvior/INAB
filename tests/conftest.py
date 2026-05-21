@@ -12,7 +12,15 @@ from inab.config import Settings
 from inab.models import BankTransaction
 from inab.store import Store
 from inab.web import create_app
-from inab.ynab_api import CreateTransactionsResult, ExistingTransaction, YnabAccount, YnabCategory, YnabPayee, YnabPlan
+from inab.budget_api import (
+    BudgetAccount,
+    BudgetCategory,
+    BudgetPayee,
+    BudgetRef,
+    CreateTransactionsResult,
+    ExistingTransaction,
+    ImportTransaction,
+)
 
 
 def camt_document(statements: str) -> bytes:
@@ -26,7 +34,14 @@ def camt_document(statements: str) -> bytes:
 """.encode()
 
 
-def statement_xml(iban: str, entries: str, *, opening: str = "1000.00", closing: str = "1000.00", currency: str = "CHF") -> str:
+def statement_xml(
+    iban: str,
+    entries: str,
+    *,
+    opening: str = "1000.00",
+    closing: str = "1000.00",
+    currency: str = "CHF",
+) -> str:
     return f"""
 <Stmt>
   <Id>STM-{iban}</Id>
@@ -96,58 +111,130 @@ def tx(
 
 
 class FakeGateway:
+    backend_name = "fake"
+    backend_label = "YNAB"
+
     def __init__(self) -> None:
-        self.plans = [YnabPlan(id="plan-1", name="Household")]
+        self.plans = [BudgetRef(id="plan-1", name="Household")]
         self.accounts = [
-            YnabAccount(id="checking-id", name="Checking", type="checking", closed=False, deleted=False, transfer_payee_id="tp-checking"),
-            YnabAccount(id="savings-id", name="Savings", type="savings", closed=False, deleted=False, transfer_payee_id="tp-savings"),
+            BudgetAccount(
+                id="checking-id",
+                name="Checking",
+                type="checking",
+                closed=False,
+                deleted=False,
+                transfer_payee_id="tp-checking",
+            ),
+            BudgetAccount(
+                id="savings-id",
+                name="Savings",
+                type="savings",
+                closed=False,
+                deleted=False,
+                transfer_payee_id="tp-savings",
+            ),
         ]
         self.categories = [
-            YnabCategory(id="cat-food", name="Food", group_name="Everyday", hidden=False, deleted=False),
-            YnabCategory(id="cat-hidden", name="Hidden", group_name="Old", hidden=True, deleted=False),
-            YnabCategory(id="cat-deleted", name="Deleted", group_name="Old", hidden=False, deleted=True),
+            BudgetCategory(
+                id="cat-food",
+                name="Food",
+                group_name="Everyday",
+                hidden=False,
+                deleted=False,
+            ),
+            BudgetCategory(
+                id="cat-hidden",
+                name="Hidden",
+                group_name="Old",
+                hidden=True,
+                deleted=False,
+            ),
+            BudgetCategory(
+                id="cat-deleted",
+                name="Deleted",
+                group_name="Old",
+                hidden=False,
+                deleted=True,
+            ),
         ]
         self.payees = [
-            YnabPayee(id="payee-coop", name="Coop Pronto", transfer_account_id=None, deleted=False),
-            YnabPayee(id="payee-sbb", name="SBB Mobile", transfer_account_id=None, deleted=False),
-            YnabPayee(id="payee-transfer", name="Transfer : Savings", transfer_account_id="savings-id", deleted=False),
-            YnabPayee(id="payee-deleted", name="Deleted Payee", transfer_account_id=None, deleted=True),
+            BudgetPayee(
+                id="payee-coop",
+                name="Coop Pronto",
+                transfer_account_id=None,
+                deleted=False,
+            ),
+            BudgetPayee(
+                id="payee-sbb",
+                name="SBB Mobile",
+                transfer_account_id=None,
+                deleted=False,
+            ),
+            BudgetPayee(
+                id="payee-transfer",
+                name="Transfer : Savings",
+                transfer_account_id="savings-id",
+                deleted=False,
+            ),
+            BudgetPayee(
+                id="payee-deleted",
+                name="Deleted Payee",
+                transfer_account_id=None,
+                deleted=True,
+            ),
         ]
         self.existing: dict[tuple[str, str], set[str]] = {}
-        self.existing_transactions_by_account: dict[tuple[str, str], list[ExistingTransaction]] = {}
+        self.existing_transactions_by_account: dict[
+            tuple[str, str], list[ExistingTransaction]
+        ] = {}
         self.existing_calls: list[tuple[str, str, date | None]] = []
-        self.created: list[dict[str, Any]] = []
+        self.created: list[ImportTransaction] = []
         self.returned_transaction_ids: list[str] = []
         self.returned_transactions: list[dict[str, Any]] = []
         self.deleted: list[tuple[str, str]] = []
         self.delete_errors: dict[str, str] = {}
 
-    def list_plans(self) -> list[YnabPlan]:
+    def list_budgets(self) -> list[BudgetRef]:
         return self.plans
 
-    def list_accounts(self, plan_id: str) -> list[YnabAccount]:
+    def list_plans(self) -> list[BudgetRef]:
+        return self.list_budgets()
+
+    def list_accounts(self, plan_id: str) -> list[BudgetAccount]:
         return self.accounts
 
-    def list_categories(self, plan_id: str) -> list[YnabCategory]:
+    def list_categories(self, plan_id: str) -> list[BudgetCategory]:
         return self.categories
 
-    def list_payees(self, plan_id: str) -> list[YnabPayee]:
+    def list_payees(self, plan_id: str) -> list[BudgetPayee]:
         return self.payees
 
-    def existing_transactions(self, plan_id: str, account_id: str, since_date: date | None = None) -> list[ExistingTransaction]:
+    def existing_transactions(
+        self, plan_id: str, account_id: str, since_date: date | None = None
+    ) -> list[ExistingTransaction]:
         self.existing_calls.append((plan_id, account_id, since_date))
         key = (plan_id, account_id)
         if key in self.existing_transactions_by_account:
             return self.existing_transactions_by_account[key]
         return [
-            ExistingTransaction(import_id=import_id, date=since_date or date(2000, 1, 1), amount=0)
+            ExistingTransaction(
+                import_id=import_id, date=since_date or date(2000, 1, 1), amount=0
+            )
             for import_id in self.existing.get(key, set())
         ]
 
-    def create_transactions(self, plan_id: str, transactions: list[dict[str, Any]]) -> CreateTransactionsResult:
+    def create_transactions(
+        self, plan_id: str, transactions: list[ImportTransaction]
+    ) -> CreateTransactionsResult:
         self.created.extend(transactions)
-        transaction_ids = self.returned_transaction_ids or [f"ynab-{i}" for i, _ in enumerate(transactions, start=1)]
-        return CreateTransactionsResult(transaction_ids=transaction_ids, duplicate_import_ids=[], transactions=self.returned_transactions)
+        transaction_ids = self.returned_transaction_ids or [
+            f"ynab-{i}" for i, _ in enumerate(transactions, start=1)
+        ]
+        return CreateTransactionsResult(
+            transaction_ids=transaction_ids,
+            duplicate_import_ids=[],
+            transactions=self.returned_transactions,
+        )
 
     def delete_transaction(self, plan_id: str, transaction_id: str) -> None:
         if transaction_id in self.delete_errors:
@@ -163,7 +250,9 @@ def fake_gateway() -> FakeGateway:
 
 
 @pytest.fixture
-def app_client(tmp_path: Path, fake_gateway: FakeGateway) -> tuple[TestClient, Store, FakeGateway]:
+def app_client(
+    tmp_path: Path, fake_gateway: FakeGateway
+) -> tuple[TestClient, Store, FakeGateway]:
     settings = Settings(
         data_dir=tmp_path,
         ynab_access_token="fake-token",
@@ -172,10 +261,16 @@ def app_client(tmp_path: Path, fake_gateway: FakeGateway) -> tuple[TestClient, S
         session_secret="test-session",
     )
     store = Store(settings.database_path)
-    app = create_app(settings=settings, store=store, gateway_factory=lambda _settings: fake_gateway)
+    app = create_app(
+        settings=settings, store=store, gateway_factory=lambda _settings: fake_gateway
+    )
     return TestClient(app), store, fake_gateway
 
 
 def login(client: TestClient) -> None:
-    response = client.post("/login", data={"username": "inab", "password": "secret", "next": "/"}, follow_redirects=False)
+    response = client.post(
+        "/login",
+        data={"username": "inab", "password": "secret", "next": "/"},
+        follow_redirects=False,
+    )
     assert response.status_code == 303

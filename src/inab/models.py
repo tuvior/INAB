@@ -7,7 +7,6 @@ from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
-
 REF_MISSING_VALUES = {"", "NONREF", "NOTPROVIDED", "NOT PROVIDED", "N/A", "NA"}
 GENERIC_PAYEES = {"paiement groupé", "paiement groupe", "ordre permanent"}
 EXACT_PAYEE_ALIASES = {
@@ -108,7 +107,12 @@ def _strip_payee_prefix(value: str) -> str:
 
 
 def _strip_card_purchase_details(value: str) -> str:
-    value = re.sub(r"\s+\d{2}\.\d{2}\.\d{4},\s*\d{2}:\d{2},\s*No carte\b.*$", "", value, flags=re.IGNORECASE)
+    value = re.sub(
+        r"\s+\d{2}\.\d{2}\.\d{4},\s*\d{2}:\d{2},\s*No carte\b.*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
     value = re.sub(r",\s*No carte\b.*$", "", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+No carte\b.*$", "", value, flags=re.IGNORECASE)
     return value
@@ -125,7 +129,9 @@ def _strip_noise_tokens(value: str) -> str:
 
 
 def _normalize_person_name(value: str) -> str:
-    match = re.fullmatch(r"([A-ZÀ-ÖØ-Þ][A-ZÀ-ÖØ-Þ' -]+),\s*([A-ZÀ-ÖØ-Þ][A-ZÀ-ÖØ-Þ' -]+)", value)
+    match = re.fullmatch(
+        r"([A-ZÀ-ÖØ-Þ][A-ZÀ-ÖØ-Þ' -]+),\s*([A-ZÀ-ÖØ-Þ][A-ZÀ-ÖØ-Þ' -]+)", value
+    )
     if not match:
         return value
     last_name, first_name = match.groups()
@@ -180,7 +186,12 @@ def _smart_title(value: str) -> str:
             rendered.append(EXACT_PAYEE_ALIASES[upper])
         elif lower in LOWERCASE_WORDS and word_index > 0:
             rendered.append(lower)
-        elif upper in UPPERCASE_WORDS or (len(token) <= 3 and token.isalpha() and token.isupper() and lower not in LOWERCASE_WORDS):
+        elif upper in UPPERCASE_WORDS or (
+            len(token) <= 3
+            and token.isalpha()
+            and token.isupper()
+            and lower not in LOWERCASE_WORDS
+        ):
             rendered.append(upper)
         else:
             rendered.append(token.capitalize())
@@ -238,7 +249,9 @@ def make_import_id(
 
 
 def amount_to_milliunits(amount: Decimal) -> int:
-    return int((amount * Decimal("1000")).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return int(
+        (amount * Decimal("1000")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
 
 
 @dataclass
@@ -258,7 +271,9 @@ class Balance:
             "kind": self.kind,
             "amount": str(self.amount),
             "indicator": self.indicator,
-            "balance_date": self.balance_date.isoformat() if self.balance_date else None,
+            "balance_date": (
+                self.balance_date.isoformat() if self.balance_date else None
+            ),
             "currency": self.currency,
         }
 
@@ -268,7 +283,11 @@ class Balance:
             kind=data["kind"],
             amount=Decimal(data["amount"]),
             indicator=data["indicator"],
-            balance_date=date.fromisoformat(data["balance_date"]) if data.get("balance_date") else None,
+            balance_date=(
+                date.fromisoformat(data["balance_date"])
+                if data.get("balance_date")
+                else None
+            ),
             currency=data["currency"],
         )
 
@@ -302,28 +321,6 @@ class BankTransaction:
     @property
     def milliunits(self) -> int:
         return amount_to_milliunits(self.amount)
-
-    def to_ynab_payload(
-        self,
-        *,
-        account_id: str,
-        transfer_payee_id: str | None = None,
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "account_id": account_id,
-            "date": self.booking_date.isoformat(),
-            "amount": self.milliunits,
-            "memo": truncate(self.memo, 500),
-            "cleared": "cleared",
-            "approved": False,
-            "import_id": self.import_id,
-        }
-        if transfer_payee_id:
-            payload["payee_id"] = transfer_payee_id
-        else:
-            payload["payee_name"] = self.payee[:200]
-            payload["category_id"] = self.category_id
-        return {key: value for key, value in payload.items() if value is not None}
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -361,7 +358,11 @@ class BankTransaction:
             iban=data["iban"],
             currency=data["currency"],
             booking_date=date.fromisoformat(data["booking_date"]),
-            value_date=date.fromisoformat(data["value_date"]) if data.get("value_date") else None,
+            value_date=(
+                date.fromisoformat(data["value_date"])
+                if data.get("value_date")
+                else None
+            ),
             amount=Decimal(data["amount"]),
             payee=data["payee"],
             memo=data.get("memo"),
@@ -413,10 +414,16 @@ class BankStatement:
             "currency": self.currency,
             "owner_name": self.owner_name,
             "bank_name": self.bank_name,
-            "period_start": self.period_start.isoformat() if self.period_start else None,
+            "period_start": (
+                self.period_start.isoformat() if self.period_start else None
+            ),
             "period_end": self.period_end.isoformat() if self.period_end else None,
-            "opening_balance": self.opening_balance.to_dict() if self.opening_balance else None,
-            "closing_balance": self.closing_balance.to_dict() if self.closing_balance else None,
+            "opening_balance": (
+                self.opening_balance.to_dict() if self.opening_balance else None
+            ),
+            "closing_balance": (
+                self.closing_balance.to_dict() if self.closing_balance else None
+            ),
             "movement_total": str(self.movement_total),
             "balances_reconcile": self.balances_reconcile,
             "transactions": [tx.to_dict() for tx in self.transactions],
@@ -430,11 +437,29 @@ class BankStatement:
             currency=data["currency"],
             owner_name=data.get("owner_name"),
             bank_name=data.get("bank_name"),
-            period_start=date.fromisoformat(data["period_start"]) if data.get("period_start") else None,
-            period_end=date.fromisoformat(data["period_end"]) if data.get("period_end") else None,
-            opening_balance=Balance.from_dict(data["opening_balance"]) if data.get("opening_balance") else None,
-            closing_balance=Balance.from_dict(data["closing_balance"]) if data.get("closing_balance") else None,
-            transactions=[BankTransaction.from_dict(tx) for tx in data.get("transactions", [])],
+            period_start=(
+                date.fromisoformat(data["period_start"])
+                if data.get("period_start")
+                else None
+            ),
+            period_end=(
+                date.fromisoformat(data["period_end"])
+                if data.get("period_end")
+                else None
+            ),
+            opening_balance=(
+                Balance.from_dict(data["opening_balance"])
+                if data.get("opening_balance")
+                else None
+            ),
+            closing_balance=(
+                Balance.from_dict(data["closing_balance"])
+                if data.get("closing_balance")
+                else None
+            ),
+            transactions=[
+                BankTransaction.from_dict(tx) for tx in data.get("transactions", [])
+            ],
         )
 
 
@@ -471,6 +496,8 @@ class ParseResult:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ParseResult":
         return cls(
-            statements=[BankStatement.from_dict(item) for item in data.get("statements", [])],
+            statements=[
+                BankStatement.from_dict(item) for item in data.get("statements", [])
+            ],
             skipped_entries=int(data.get("skipped_entries", 0)),
         )

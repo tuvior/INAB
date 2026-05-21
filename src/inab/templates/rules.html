@@ -4,7 +4,7 @@
 <section class="toolbar-section">
   <div>
     <h1>Rules</h1>
-    <p class="muted">Rewrite payees and assign YNAB categories before preview and import.</p>
+    <p class="muted">Rewrite payees and assign {{ backend_label }} categories before preview and import.</p>
   </div>
   <a class="button secondary" href="{{ url_path_for('setup') }}">Setup</a>
 </section>
@@ -28,7 +28,7 @@
   <div class="panel">
     <h2>Payees</h2>
     <p class="metric">{{ payees|length }}</p>
-    <p class="muted">Loaded from YNAB</p>
+    <p class="muted">Loaded from {{ backend_label }}</p>
   </div>
   <div class="panel">
     <h2>Affected</h2>
@@ -111,7 +111,7 @@
 </section>
 
 <section>
-  <h2>YNAB payees</h2>
+  <h2>{{ backend_label }} payees</h2>
   {% if not payees %}
     <p class="muted">No payees loaded.</p>
   {% else %}

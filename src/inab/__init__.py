@@ -1,4 +1,4 @@
-"""INAB: Swiss bank CAMT.053 importer for YNAB."""
+"""INAB: Swiss bank CAMT.053 importer for budget backends."""
 
 __all__ = ["__version__"]
 

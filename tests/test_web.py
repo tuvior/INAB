@@ -15,7 +15,9 @@ from inab.ynab_api import ExistingTransaction, YnabPlan
 from conftest import FakeGateway, camt_document, entry_xml, login, statement_xml
 
 
-def test_auth_gate_redirects_to_login(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_auth_gate_redirects_to_login(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, _, _ = app_client
 
     response = client.get("/", follow_redirects=False)
@@ -24,7 +26,9 @@ def test_auth_gate_redirects_to_login(app_client: tuple[TestClient, Store, FakeG
     assert response.headers["location"].startswith("/login")
 
 
-def test_rules_page_requires_auth(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_rules_page_requires_auth(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, _, _ = app_client
 
     response = client.get("/rules", follow_redirects=False)
@@ -33,7 +37,9 @@ def test_rules_page_requires_auth(app_client: tuple[TestClient, Store, FakeGatew
     assert response.headers["location"].startswith("/login")
 
 
-def test_import_history_requires_auth(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_import_history_requires_auth(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, _, _ = app_client
 
     response = client.get("/imports", follow_redirects=False)
@@ -42,7 +48,9 @@ def test_import_history_requires_auth(app_client: tuple[TestClient, Store, FakeG
     assert response.headers["location"].startswith("/login")
 
 
-def test_root_path_uses_relative_prefixed_template_urls(tmp_path, fake_gateway: FakeGateway) -> None:
+def test_root_path_uses_relative_prefixed_template_urls(
+    tmp_path, fake_gateway: FakeGateway
+) -> None:
     settings = Settings(
         data_dir=tmp_path,
         ynab_access_token="fake-token",
@@ -51,7 +59,11 @@ def test_root_path_uses_relative_prefixed_template_urls(tmp_path, fake_gateway: 
         session_secret="test-session",
         root_path="/inab",
     )
-    app = create_app(settings=settings, store=Store(settings.database_path), gateway_factory=lambda _settings: fake_gateway)
+    app = create_app(
+        settings=settings,
+        store=Store(settings.database_path),
+        gateway_factory=lambda _settings: fake_gateway,
+    )
     client = TestClient(app)
 
     response = client.get("/login")
@@ -66,7 +78,9 @@ def test_root_path_uses_relative_prefixed_template_urls(tmp_path, fake_gateway: 
     assert "http://testserver" not in response.text
 
 
-def test_root_path_redirects_to_prefixed_paths(tmp_path, fake_gateway: FakeGateway) -> None:
+def test_root_path_redirects_to_prefixed_paths(
+    tmp_path, fake_gateway: FakeGateway
+) -> None:
     settings = Settings(
         data_dir=tmp_path,
         ynab_access_token="fake-token",
@@ -75,7 +89,11 @@ def test_root_path_redirects_to_prefixed_paths(tmp_path, fake_gateway: FakeGatew
         session_secret="test-session",
         root_path="/inab",
     )
-    app = create_app(settings=settings, store=Store(settings.database_path), gateway_factory=lambda _settings: fake_gateway)
+    app = create_app(
+        settings=settings,
+        store=Store(settings.database_path),
+        gateway_factory=lambda _settings: fake_gateway,
+    )
     client = TestClient(app)
 
     gated = client.get("/", follow_redirects=False)
@@ -98,7 +116,9 @@ def test_root_path_redirects_to_prefixed_paths(tmp_path, fake_gateway: FakeGatew
     assert already_prefixed.headers["location"] == "/inab/setup"
 
 
-def test_upload_preview_button_is_contextual(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_upload_preview_button_is_contextual(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, _, _ = app_client
     login(client)
 
@@ -107,10 +127,15 @@ def test_upload_preview_button_is_contextual(app_client: tuple[TestClient, Store
     assert response.status_code == 200
     assert 'id="preview-button"' in response.text
     assert "Choose file to preview" in response.text
-    assert '<button id="preview-button" class="drop-action" type="submit" disabled>' in response.text
+    assert (
+        '<button id="preview-button" class="drop-action" type="submit" disabled>'
+        in response.text
+    )
 
 
-def test_rules_page_loads_visible_categories_and_saves_rule(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_rules_page_loads_visible_categories_and_saves_rule(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
@@ -143,7 +168,9 @@ def test_rules_page_loads_visible_categories_and_saves_rule(app_client: tuple[Te
     assert rule.category_name == "Everyday: Food"
 
 
-def test_rules_page_lists_payees_and_rule_effects(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_rules_page_lists_payees_and_rule_effects(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
@@ -170,7 +197,9 @@ def test_rules_page_lists_payees_and_rule_effects(app_client: tuple[TestClient, 
     assert "Deleted Payee" not in page.text
 
 
-def test_rules_page_tests_fake_transaction_first_match_wins(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_rules_page_tests_fake_transaction_first_match_wins(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
@@ -210,7 +239,9 @@ def test_rules_page_tests_fake_transaction_first_match_wins(app_client: tuple[Te
     assert "Everyday: Food" in response.text
 
 
-def test_rules_page_displays_invalid_rule_errors(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_rules_page_displays_invalid_rule_errors(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
@@ -233,15 +264,33 @@ def test_rules_page_displays_invalid_rule_errors(app_client: tuple[TestClient, S
     assert "Invalid regular expression" in response.text
 
 
-def test_upload_preview_marks_existing_import_id_as_duplicate(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_upload_preview_marks_existing_import_id_as_duplicate(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     gateway.existing[("plan-1", "checking-id")] = {"INAB:REF1"}
-    content = camt_document(statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Payee"), opening="100.00", closing="90.00"))
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry_xml("10.00", "DBIT", "REF1", "Payee"),
+            opening="100.00",
+            closing="90.00",
+        )
+    )
 
-    response = client.post("/uploads", files={"file": ("test.xml", content, "application/xml")}, follow_redirects=True)
+    response = client.post(
+        "/uploads",
+        files={"file": ("test.xml", content, "application/xml")},
+        follow_redirects=True,
+    )
 
     assert response.status_code == 200
     assert "duplicate" in response.text
@@ -251,11 +300,18 @@ def test_upload_preview_marks_existing_import_id_as_duplicate(app_client: tuple[
     assert gateway.existing_calls == [("plan-1", "checking-id", date(2026, 4, 10))]
 
 
-def test_upload_preview_marks_bank_date_card_fallback_import_id_as_duplicate(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_upload_preview_marks_bank_date_card_fallback_import_id_as_duplicate(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     old_import_id = make_import_id(
         iban="CH111",
         source_ref=None,
@@ -277,9 +333,15 @@ def test_upload_preview_marks_bank_date_card_fallback_import_id_as_duplicate(app
 15.01.2026, 13:58, No carte Visa Debit 400000xxxxxx0002</AddtlNtryInf>
 </Ntry>
 """
-    content = camt_document(statement_xml("CH111", entry, opening="100.00", closing="65.70"))
+    content = camt_document(
+        statement_xml("CH111", entry, opening="100.00", closing="65.70")
+    )
 
-    upload = client.post("/uploads", files={"file": ("card.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("card.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
 
     assert upload.status_code == 303
     job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
@@ -290,11 +352,18 @@ def test_upload_preview_marks_bank_date_card_fallback_import_id_as_duplicate(app
     assert gateway.existing_calls == [("plan-1", "checking-id", date(2026, 1, 15))]
 
 
-def test_upload_preview_sorts_rows_by_effective_transaction_date(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_upload_preview_sorts_rows_by_effective_transaction_date(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     card_entry = """
 <Ntry>
   <Amt Ccy="CHF">58.65</Amt>
@@ -311,31 +380,59 @@ def test_upload_preview_sorts_rows_by_effective_transaction_date(app_client: tup
     content = camt_document(
         statement_xml(
             "CH111",
-            entry_xml("5.80", "DBIT", "TWINTREF", "Achat TWINT SBB MOBILE", booking_date="2026-03-31", value_date="2026-03-31")
-            + entry_xml("58.95", "DBIT", "BILLREF", "Insurance Example AG", booking_date="2026-04-01", value_date="2026-04-01")
+            entry_xml(
+                "5.80",
+                "DBIT",
+                "TWINTREF",
+                "Achat TWINT SBB MOBILE",
+                booking_date="2026-03-31",
+                value_date="2026-03-31",
+            )
+            + entry_xml(
+                "58.95",
+                "DBIT",
+                "BILLREF",
+                "Insurance Example AG",
+                booking_date="2026-04-01",
+                value_date="2026-04-01",
+            )
             + card_entry,
             opening="100.00",
             closing="-23.40",
         )
     )
 
-    upload = client.post("/uploads", files={"file": ("ordered.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("ordered.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
 
     assert upload.status_code == 303
     job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
     assert job is not None
-    assert [(row["transaction"]["booking_date"], row["transaction"]["payee"]) for row in job["payload"]["rows"]] == [
+    assert [
+        (row["transaction"]["booking_date"], row["transaction"]["payee"])
+        for row in job["payload"]["rows"]
+    ] == [
         ("2026-03-30", "Coop"),
         ("2026-03-31", "SBB Mobile"),
         ("2026-04-01", "Insurance Example AG"),
     ]
 
 
-def test_upload_preview_applies_rule_metadata_and_import_sends_category(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_upload_preview_applies_rule_metadata_and_import_sends_category(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     store.create_rule(
         name="SBB travel",
         enabled=True,
@@ -345,9 +442,20 @@ def test_upload_preview_applies_rule_metadata_and_import_sends_category(app_clie
         category_id="cat-food",
         category_name="Everyday: Food",
     )
-    content = camt_document(statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Achat TWINT SBB MOBILE"), opening="100.00", closing="90.00"))
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry_xml("10.00", "DBIT", "REF1", "Achat TWINT SBB MOBILE"),
+            opening="100.00",
+            closing="90.00",
+        )
+    )
 
-    upload = client.post("/uploads", files={"file": ("test.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("test.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
     assert upload.status_code == 303
     job_id = upload.headers["location"].rsplit("/", 1)[1]
     job = store.get_job(job_id)
@@ -362,16 +470,28 @@ def test_upload_preview_applies_rule_metadata_and_import_sends_category(app_clie
     response = client.post(f"/imports/{job_id}", follow_redirects=False)
 
     assert response.status_code == 303
-    assert gateway.created[0]["payee_name"] == "SBB"
-    assert gateway.created[0]["category_id"] == "cat-food"
+    assert gateway.created[0].payee_name == "SBB"
+    assert gateway.created[0].category_id == "cat-food"
 
 
-def test_import_accepts_transfer_and_skips_counterpart(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_import_accepts_transfer_and_skips_counterpart(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
-    store.upsert_mapping(iban="CH222", ynab_account_id="savings-id", ynab_account_name="Savings", transfer_payee_id="tp-savings")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
+    store.upsert_mapping(
+        iban="CH222",
+        ynab_account_id="savings-id",
+        ynab_account_name="Savings",
+        transfer_payee_id="tp-savings",
+    )
     store.create_rule(
         name="Transfer category",
         enabled=True,
@@ -382,35 +502,60 @@ def test_import_accepts_transfer_and_skips_counterpart(app_client: tuple[TestCli
         category_name="Everyday: Food",
     )
     content = camt_document(
-        statement_xml("CH111", entry_xml("250.00", "DBIT", "REF-D", "Transfer to savings"), opening="1000.00", closing="750.00")
-        + statement_xml("CH222", entry_xml("250.00", "CRDT", "REF-C", "Transfer from checking"), opening="500.00", closing="750.00")
+        statement_xml(
+            "CH111",
+            entry_xml("250.00", "DBIT", "REF-D", "Transfer to savings"),
+            opening="1000.00",
+            closing="750.00",
+        )
+        + statement_xml(
+            "CH222",
+            entry_xml("250.00", "CRDT", "REF-C", "Transfer from checking"),
+            opening="500.00",
+            closing="750.00",
+        )
     )
 
-    upload = client.post("/uploads", files={"file": ("multi.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("multi.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
     assert upload.status_code == 303
     job_id = upload.headers["location"].rsplit("/", 1)[1]
     job = store.get_job(job_id)
     assert job is not None
     transfer_id = job["payload"]["transfers"][0]["id"]
 
-    response = client.post(f"/imports/{job_id}", data={"accepted_transfers": transfer_id}, follow_redirects=False)
+    response = client.post(
+        f"/imports/{job_id}",
+        data={"accepted_transfers": transfer_id},
+        follow_redirects=False,
+    )
 
     assert response.status_code == 303
     assert len(gateway.created) == 1
-    assert gateway.created[0]["account_id"] == "checking-id"
-    assert gateway.created[0]["payee_id"] == "tp-savings"
-    assert "category_id" not in gateway.created[0]
-    assert gateway.created[0]["amount"] == -250000
+    assert gateway.created[0].account_id == "checking-id"
+    assert gateway.created[0].transfer_payee_id == "tp-savings"
+    assert gateway.created[0].category_id is None
+    assert gateway.created[0].amount_milliunits == -250000
     updated_job = store.get_job(job_id)
     assert updated_job is not None
     assert updated_job["result"]["skipped_transfer_counterparts"] == ["INAB:REF-C"]
 
 
-def test_import_page_shows_submitted_and_returned_ynab_transactions(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_import_page_shows_submitted_and_returned_ynab_transactions(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     gateway.returned_transaction_ids = ["ynab-1", "ynab-2"]
     gateway.returned_transactions = [
         {
@@ -431,14 +576,28 @@ def test_import_page_shows_submitted_and_returned_ynab_transactions(app_client: 
             "import_id": "INAB:REF1",
         },
     ]
-    content = camt_document(statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Payee"), opening="100.00", closing="90.00"))
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry_xml("10.00", "DBIT", "REF1", "Payee"),
+            opening="100.00",
+            closing="90.00",
+        )
+    )
 
-    upload = client.post("/uploads", files={"file": ("test.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("test.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
     job_id = upload.headers["location"].rsplit("/", 1)[1]
     imported = client.post(f"/imports/{job_id}", follow_redirects=True)
 
     assert imported.status_code == 200
-    assert "Submitted 1 bank row to YNAB. YNAB returned 2 saved transaction IDs." in imported.text
+    assert (
+        "Submitted 1 bank row to YNAB. YNAB returned 2 saved transaction IDs."
+        in imported.text
+    )
     assert "Import result" in imported.text
     assert "Matched existing" in imported.text
     assert "Bank rows submitted by INAB" in imported.text
@@ -452,17 +611,33 @@ def test_import_page_shows_submitted_and_returned_ynab_transactions(app_client: 
     assert job["result"]["ynab_matched_count"] == 1
 
 
-def test_empty_statement_iban_does_not_block_preview(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_empty_statement_iban_does_not_block_preview(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     content = camt_document(
-        statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Achat TWINT SBB MOBILE"), opening="100.00", closing="90.00")
+        statement_xml(
+            "CH111",
+            entry_xml("10.00", "DBIT", "REF1", "Achat TWINT SBB MOBILE"),
+            opening="100.00",
+            closing="90.00",
+        )
         + statement_xml("CH222", "", opening="500.00", closing="500.00")
     )
 
-    upload = client.post("/uploads", files={"file": ("multi.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("multi.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
 
     assert upload.status_code == 303
     job_id = upload.headers["location"].rsplit("/", 1)[1]
@@ -472,14 +647,32 @@ def test_empty_statement_iban_does_not_block_preview(app_client: tuple[TestClien
     assert job["payload"]["missing_ibans"] == []
 
 
-def test_preview_shows_summary_reconciliation_and_warnings(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_preview_shows_summary_reconciliation_and_warnings(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
-    content = camt_document(statement_xml("CH111", entry_xml("25.00", "DBIT", "REF1", "Payee"), opening="100.00", closing="80.00"))
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry_xml("25.00", "DBIT", "REF1", "Payee"),
+            opening="100.00",
+            closing="80.00",
+        )
+    )
 
-    response = client.post("/uploads", files={"file": ("mismatch.xml", content, "application/xml")}, follow_redirects=True)
+    response = client.post(
+        "/uploads",
+        files={"file": ("mismatch.xml", content, "application/xml")},
+        follow_redirects=True,
+    )
 
     assert response.status_code == 200
     assert "Import summary" in response.text
@@ -491,7 +684,9 @@ def test_preview_shows_summary_reconciliation_and_warnings(app_client: tuple[Tes
     assert "80.00" in response.text
 
 
-def test_legacy_import_preview_without_reconciliation_payload_renders(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_legacy_import_preview_without_reconciliation_payload_renders(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     job_id = store.create_job(
@@ -537,31 +732,70 @@ def test_legacy_import_preview_without_reconciliation_payload_renders(app_client
     assert "INAB:REF1" in response.text
 
 
-def test_preview_warns_for_zero_ready_rows(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_preview_warns_for_zero_ready_rows(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     gateway.existing[("plan-1", "checking-id")] = {"INAB:REF1"}
-    content = camt_document(statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Payee"), opening="100.00", closing="90.00"))
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry_xml("10.00", "DBIT", "REF1", "Payee"),
+            opening="100.00",
+            closing="90.00",
+        )
+    )
 
-    response = client.post("/uploads", files={"file": ("duplicates.xml", content, "application/xml")}, follow_redirects=True)
+    response = client.post(
+        "/uploads",
+        files={"file": ("duplicates.xml", content, "application/xml")},
+        follow_redirects=True,
+    )
 
     assert response.status_code == 200
     assert "This import has zero ready rows." in response.text
 
 
-def test_missing_iban_can_be_ignored_for_one_import(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_missing_iban_can_be_ignored_for_one_import(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     content = camt_document(
-        statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Mapped"), opening="100.00", closing="90.00")
-        + statement_xml("CH222", entry_xml("20.00", "DBIT", "REF2", "Unmapped"), opening="100.00", closing="80.00")
+        statement_xml(
+            "CH111",
+            entry_xml("10.00", "DBIT", "REF1", "Mapped"),
+            opening="100.00",
+            closing="90.00",
+        )
+        + statement_xml(
+            "CH222",
+            entry_xml("20.00", "DBIT", "REF2", "Unmapped"),
+            opening="100.00",
+            closing="80.00",
+        )
     )
 
-    upload = client.post("/uploads", files={"file": ("multi.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("multi.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
     assert upload.status_code == 303
     job_id = upload.headers["location"].rsplit("/", 1)[1]
     job = store.get_job(job_id)
@@ -582,27 +816,50 @@ def test_missing_iban_can_be_ignored_for_one_import(app_client: tuple[TestClient
     assert updated_job["payload"]["missing_ibans"] == []
     assert updated_job["payload"]["ignored_ibans"] == ["CH222"]
     assert updated_job["payload"]["ignored_transaction_count"] == 1
-    assert [row["transaction"]["iban"] for row in updated_job["payload"]["rows"]] == ["CH111"]
+    assert [row["transaction"]["iban"] for row in updated_job["payload"]["rows"]] == [
+        "CH111"
+    ]
 
     response = client.post(f"/imports/{job_id}", follow_redirects=False)
 
     assert response.status_code == 303
     assert len(gateway.created) == 1
-    assert gateway.created[0]["import_id"] == "INAB:REF1"
+    assert gateway.created[0].import_id == "INAB:REF1"
 
 
-def test_upload_preview_marks_duplicates_even_when_other_ibans_are_unmapped(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_upload_preview_marks_duplicates_even_when_other_ibans_are_unmapped(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     gateway.existing[("plan-1", "checking-id")] = {"INAB:REF1"}
     content = camt_document(
-        statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Mapped duplicate"), opening="100.00", closing="90.00")
-        + statement_xml("CH222", entry_xml("20.00", "DBIT", "REF2", "Unmapped"), opening="100.00", closing="80.00")
+        statement_xml(
+            "CH111",
+            entry_xml("10.00", "DBIT", "REF1", "Mapped duplicate"),
+            opening="100.00",
+            closing="90.00",
+        )
+        + statement_xml(
+            "CH222",
+            entry_xml("20.00", "DBIT", "REF2", "Unmapped"),
+            opening="100.00",
+            closing="80.00",
+        )
     )
 
-    upload = client.post("/uploads", files={"file": ("mixed.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("mixed.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
 
     assert upload.status_code == 303
     job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
@@ -616,11 +873,18 @@ def test_upload_preview_marks_duplicates_even_when_other_ibans_are_unmapped(app_
     assert gateway.existing_calls == [("plan-1", "checking-id", date(2026, 4, 10))]
 
 
-def test_upload_preview_marks_legacy_split_import_id_as_duplicate(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_upload_preview_marks_legacy_split_import_id_as_duplicate(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     uetr = "7f590b14-505f-4e16-8701-3fa01ee7a5a1"
     gateway.existing[("plan-1", "checking-id")] = {
         make_import_id(
@@ -657,16 +921,27 @@ def test_upload_preview_marks_legacy_split_import_id_as_duplicate(app_client: tu
   <AddtlNtryInf>Ordre permanent</AddtlNtryInf>
 </Ntry>
 """
-    content = camt_document(statement_xml("CH111", entry, opening="1000.00", closing="399.00"))
+    content = camt_document(
+        statement_xml("CH111", entry, opening="1000.00", closing="399.00")
+    )
 
-    upload = client.post("/uploads", files={"file": ("legacy.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("legacy.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
 
     assert upload.status_code == 303
     job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
     assert job is not None
-    rows_by_import_id = {row["transaction"]["import_id"]: row for row in job["payload"]["rows"]}
+    rows_by_import_id = {
+        row["transaction"]["import_id"]: row for row in job["payload"]["rows"]
+    }
     assert rows_by_import_id["INAB:ENTRYREF.2"]["status"] == "duplicate"
-    assert rows_by_import_id["INAB:ENTRYREF.2"]["duplicate_match"]["match_type"] == "legacy_import_id"
+    assert (
+        rows_by_import_id["INAB:ENTRYREF.2"]["duplicate_match"]["match_type"]
+        == "legacy_import_id"
+    )
 
 
 def test_upload_preview_matches_structured_reference_alias_only_with_same_date_and_amount(
@@ -675,7 +950,12 @@ def test_upload_preview_matches_structured_reference_alias_only_with_same_date_a
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     gateway.existing_transactions_by_account[("plan-1", "checking-id")] = [
         ExistingTransaction(
             import_id="INAB:DETAILREFONE",
@@ -714,14 +994,22 @@ def test_upload_preview_matches_structured_reference_alias_only_with_same_date_a
   <AddtlNtryInf>Paiement groupé</AddtlNtryInf>
 </Ntry>
 """
-    content = camt_document(statement_xml("CH111", entry, opening="100.00", closing="60.90"))
+    content = camt_document(
+        statement_xml("CH111", entry, opening="100.00", closing="60.90")
+    )
 
-    upload = client.post("/uploads", files={"file": ("structured.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("structured.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
 
     assert upload.status_code == 303
     job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
     assert job is not None
-    rows_by_import_id = {row["transaction"]["import_id"]: row for row in job["payload"]["rows"]}
+    rows_by_import_id = {
+        row["transaction"]["import_id"]: row for row in job["payload"]["rows"]
+    }
     assert rows_by_import_id["INAB:ENTRYREF.1"]["status"] == "duplicate"
     assert rows_by_import_id["INAB:ENTRYREF.2"]["status"] == "ready"
 
@@ -732,7 +1020,12 @@ def test_upload_preview_matches_structured_reference_alias_with_partial_existing
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     gateway.existing_transactions_by_account[("plan-1", "checking-id")] = [
         ExistingTransaction(
             import_id="INAB:DETAILREFONE",
@@ -771,9 +1064,15 @@ def test_upload_preview_matches_structured_reference_alias_with_partial_existing
   <AddtlNtryInf>Paiement groupé</AddtlNtryInf>
 </Ntry>
 """
-    content = camt_document(statement_xml("CH111", entry, opening="100.00", closing="60.90"))
+    content = camt_document(
+        statement_xml("CH111", entry, opening="100.00", closing="60.90")
+    )
 
-    upload = client.post("/uploads", files={"file": ("structured.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("structured.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
 
     assert upload.status_code == 303
     job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
@@ -787,7 +1086,12 @@ def test_upload_preview_does_not_match_ambiguous_structured_reference_alias_with
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     gateway.existing_transactions_by_account[("plan-1", "checking-id")] = [
         ExistingTransaction(
             import_id="INAB:RECURRINGREF",
@@ -821,9 +1125,15 @@ def test_upload_preview_does_not_match_ambiguous_structured_reference_alias_with
   <AddtlNtryInf>Paiement groupé</AddtlNtryInf>
 </Ntry>
 """
-    content = camt_document(statement_xml("CH111", entry, opening="100.00", closing="46.10"))
+    content = camt_document(
+        statement_xml("CH111", entry, opening="100.00", closing="46.10")
+    )
 
-    upload = client.post("/uploads", files={"file": ("structured.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("structured.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
 
     assert upload.status_code == 303
     job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
@@ -831,11 +1141,18 @@ def test_upload_preview_does_not_match_ambiguous_structured_reference_alias_with
     assert {row["status"] for row in job["payload"]["rows"]} == {"ready"}
 
 
-def test_upload_preview_applies_rules_even_when_other_ibans_are_unmapped(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_upload_preview_applies_rules_even_when_other_ibans_are_unmapped(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
     store.create_rule(
         name="Mapped cleanup",
         enabled=True,
@@ -846,11 +1163,25 @@ def test_upload_preview_applies_rules_even_when_other_ibans_are_unmapped(app_cli
         category_name="Everyday: Food",
     )
     content = camt_document(
-        statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Mapped raw"), opening="100.00", closing="90.00")
-        + statement_xml("CH222", entry_xml("20.00", "DBIT", "REF2", "Unmapped"), opening="100.00", closing="80.00")
+        statement_xml(
+            "CH111",
+            entry_xml("10.00", "DBIT", "REF1", "Mapped raw"),
+            opening="100.00",
+            closing="90.00",
+        )
+        + statement_xml(
+            "CH222",
+            entry_xml("20.00", "DBIT", "REF2", "Unmapped"),
+            opening="100.00",
+            closing="80.00",
+        )
     )
 
-    upload = client.post("/uploads", files={"file": ("mixed.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("mixed.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
 
     assert upload.status_code == 303
     job = store.get_job(upload.headers["location"].rsplit("/", 1)[1])
@@ -864,19 +1195,32 @@ def test_upload_preview_applies_rules_even_when_other_ibans_are_unmapped(app_cli
     assert mapped["applied_rule_name"] == "Mapped cleanup"
 
 
-def test_setup_hides_mapped_and_dismissed_account_suggestions(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_setup_hides_mapped_and_dismissed_account_suggestions(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.observe_account(iban="CH111", currency="CHF", owner_name="Owner", bank_name="Bank")
-    store.observe_account(iban="CH222", currency="CHF", owner_name="Owner", bank_name="Bank")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
+    store.observe_account(
+        iban="CH111", currency="CHF", owner_name="Owner", bank_name="Bank"
+    )
+    store.observe_account(
+        iban="CH222", currency="CHF", owner_name="Owner", bank_name="Bank"
+    )
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
 
     page = client.get("/setup")
 
     assert page.status_code == 200
     assert "No unmapped account suggestions" not in page.text
-    suggestions = page.text.split("Mapping suggestions", 1)[1].split("Manual mapping", 1)[0]
+    suggestions = page.text.split("Mapping suggestions", 1)[1].split(
+        "Manual mapping", 1
+    )[0]
     assert "CH111" not in suggestions
     assert "CH222" in suggestions
 
@@ -891,27 +1235,35 @@ def test_setup_hides_mapped_and_dismissed_account_suggestions(app_client: tuple[
     assert "CH222" not in response.text
 
 
-def test_csv_upload_requires_upload_account_selection(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_csv_upload_requires_upload_account_selection(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    content = b'''"Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
+    content = b""""Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
 "2026-04-30";"600.00";"";"";"";"Alex Example";"";"income";"";"no";"no"
-'''
+"""
 
-    upload = client.post("/uploads", files={"file": ("other-bank.csv", content, "text/csv")}, follow_redirects=True)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("other-bank.csv", content, "text/csv")},
+        follow_redirects=True,
+    )
 
     assert upload.status_code == 200
     assert "Select a YNAB account for this CSV upload" in upload.text
 
 
-def test_csv_upload_uses_selected_upload_account(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_csv_upload_uses_selected_upload_account(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    content = b'''"Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
+    content = b""""Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
 "2026-04-30";"600.00";"";"";"";"Alex Example";"";"income";"";"no";"no"
-'''
+"""
 
     upload = client.post(
         "/uploads",
@@ -933,21 +1285,29 @@ def test_csv_upload_uses_selected_upload_account(app_client: tuple[TestClient, S
     response = client.post(f"/imports/{job_id}", follow_redirects=False)
 
     assert response.status_code == 303
-    assert gateway.created[0]["account_id"] == "savings-id"
+    assert gateway.created[0].account_id == "savings-id"
 
 
-def test_setup_hides_labeled_and_dismissed_counterparty_suggestions(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_setup_hides_labeled_and_dismissed_counterparty_suggestions(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.observe_counterparty_account(iban="CH333", name="External One", bank_name="Bank")
-    store.observe_counterparty_account(iban="CH444", name="External Two", bank_name="Bank")
+    store.observe_counterparty_account(
+        iban="CH333", name="External One", bank_name="Bank"
+    )
+    store.observe_counterparty_account(
+        iban="CH444", name="External Two", bank_name="Bank"
+    )
     store.upsert_counterparty_mapping(iban="CH333", label="Pension")
 
     page = client.get("/setup")
 
     assert page.status_code == 200
-    suggestions = page.text.split("Counterparty suggestions", 1)[1].split("Saved counterparty labels", 1)[0]
+    suggestions = page.text.split("Counterparty suggestions", 1)[1].split(
+        "Saved counterparty labels", 1
+    )[0]
     assert "CH333" not in suggestions
     assert "CH444" in suggestions
 
@@ -962,7 +1322,9 @@ def test_setup_hides_labeled_and_dismissed_counterparty_suggestions(app_client: 
     assert "CH444" not in response.text
 
 
-def test_setup_saves_self_names_from_repeated_rows(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_setup_saves_self_names_from_repeated_rows(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
 
@@ -977,13 +1339,15 @@ def test_setup_saves_self_names_from_repeated_rows(app_client: tuple[TestClient,
     assert store.self_names() == ["Alex Example", "Example Alex", "A Example"]
 
 
-def test_rule_edited_csv_row_keeps_original_import_id(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_rule_edited_csv_row_keeps_original_import_id(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    content = b'''"Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
+    content = b""""Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
 "2026-04-30";"600.00";"";"";"";"Alex Example";"";"income";"";"no";"no"
-'''
+"""
     first = client.post(
         "/uploads",
         data={"csv_ynab_account_id": "savings-id"},
@@ -1017,13 +1381,22 @@ def test_rule_edited_csv_row_keeps_original_import_id(app_client: tuple[TestClie
     assert row["import_id"] == original_import_id
 
 
-def test_self_named_counterparty_iban_mapping_relabels_transfer(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_self_named_counterparty_iban_mapping_relabels_transfer(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
     store.save_self_names(["Alex Example"])
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
-    store.upsert_counterparty_mapping(iban="CH0000000000000000005", label="External savings")
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
+    store.upsert_counterparty_mapping(
+        iban="CH0000000000000000005", label="External savings"
+    )
     entry = """
 <Ntry>
   <Amt Ccy="CHF">600.00</Amt>
@@ -1047,9 +1420,15 @@ def test_self_named_counterparty_iban_mapping_relabels_transfer(app_client: tupl
   <AddtlNtryInf>Ordre permanent</AddtlNtryInf>
 </Ntry>
 """
-    content = camt_document(statement_xml("CH111", entry, opening="1000.00", closing="400.00"))
+    content = camt_document(
+        statement_xml("CH111", entry, opening="1000.00", closing="400.00")
+    )
 
-    upload = client.post("/uploads", files={"file": ("self.xml", content, "application/xml")}, follow_redirects=False)
+    upload = client.post(
+        "/uploads",
+        files={"file": ("self.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
     assert upload.status_code == 303
     job_id = upload.headers["location"].rsplit("/", 1)[1]
     job = store.get_job(job_id)
@@ -1057,30 +1436,49 @@ def test_self_named_counterparty_iban_mapping_relabels_transfer(app_client: tupl
     row = job["payload"]["rows"][0]
     assert row["transaction"]["payee"] == "Transfer to External savings"
     assert "Self-transfer account: External savings" in row["transaction"]["memo"]
-    assert store.list_observed_counterparty_accounts()[0]["iban"] == "CH0000000000000000005"
+    assert (
+        store.list_observed_counterparty_accounts()[0]["iban"]
+        == "CH0000000000000000005"
+    )
 
     response = client.post(f"/imports/{job_id}", follow_redirects=False)
 
     assert response.status_code == 303
-    assert gateway.created[0]["payee_name"] == "Transfer to External savings"
+    assert gateway.created[0].payee_name == "Transfer to External savings"
 
 
-def test_import_history_lists_jobs(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_import_history_lists_jobs(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     first = store.create_job(
         filename="preview.xml",
         status="preview",
         plan_id="plan-1",
-        payload={"transaction_count": 2, "ready_count": 1, "duplicate_count": 1, "transfers": []},
+        payload={
+            "transaction_count": 2,
+            "ready_count": 1,
+            "duplicate_count": 1,
+            "transfers": [],
+        },
     )
     imported = store.create_job(
         filename="imported.xml",
         status="imported",
         plan_id="plan-1",
-        payload={"transaction_count": 3, "ready_count": 3, "duplicate_count": 0, "transfers": [{"id": "t1"}]},
+        payload={
+            "transaction_count": 3,
+            "ready_count": 3,
+            "duplicate_count": 0,
+            "transfers": [{"id": "t1"}],
+        },
     )
-    store.update_job(imported, status="imported", result={"created_count": 2, "transaction_ids": ["ynab-1", "ynab-2"]})
+    store.update_job(
+        imported,
+        status="imported",
+        result={"created_count": 2, "transaction_ids": ["ynab-1", "ynab-2"]},
+    )
     assert first
 
     page = client.get("/imports")
@@ -1093,13 +1491,31 @@ def test_import_history_lists_jobs(app_client: tuple[TestClient, Store, FakeGate
     assert "2</strong> saved IDs" in page.text
 
 
-def test_imported_job_can_be_undone(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_imported_job_can_be_undone(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
-    content = camt_document(statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Payee"), opening="100.00", closing="90.00"))
-    upload = client.post("/uploads", files={"file": ("test.xml", content, "application/xml")}, follow_redirects=False)
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry_xml("10.00", "DBIT", "REF1", "Payee"),
+            opening="100.00",
+            closing="90.00",
+        )
+    )
+    upload = client.post(
+        "/uploads",
+        files={"file": ("test.xml", content, "application/xml")},
+        follow_redirects=False,
+    )
     job_id = upload.headers["location"].rsplit("/", 1)[1]
     imported = client.post(f"/imports/{job_id}", follow_redirects=False)
     assert imported.status_code == 303
@@ -1115,24 +1531,50 @@ def test_imported_job_can_be_undone(app_client: tuple[TestClient, Store, FakeGat
     assert job["result"]["undo"]["errors"] == []
 
 
-def test_undo_is_not_exposed_for_preview_jobs(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_undo_is_not_exposed_for_preview_jobs(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, _ = app_client
     login(client)
     store.save_selected_plan("plan-1", "Household")
-    store.upsert_mapping(iban="CH111", ynab_account_id="checking-id", ynab_account_name="Checking", transfer_payee_id="tp-checking")
-    content = camt_document(statement_xml("CH111", entry_xml("10.00", "DBIT", "REF1", "Payee"), opening="100.00", closing="90.00"))
+    store.upsert_mapping(
+        iban="CH111",
+        ynab_account_id="checking-id",
+        ynab_account_name="Checking",
+        transfer_payee_id="tp-checking",
+    )
+    content = camt_document(
+        statement_xml(
+            "CH111",
+            entry_xml("10.00", "DBIT", "REF1", "Payee"),
+            opening="100.00",
+            closing="90.00",
+        )
+    )
 
-    page = client.post("/uploads", files={"file": ("test.xml", content, "application/xml")}, follow_redirects=True)
+    page = client.post(
+        "/uploads",
+        files={"file": ("test.xml", content, "application/xml")},
+        follow_redirects=True,
+    )
 
     assert page.status_code == 200
     assert "Undo import" not in page.text
 
 
-def test_partial_undo_failure_keeps_error_details(app_client: tuple[TestClient, Store, FakeGateway]) -> None:
+def test_partial_undo_failure_keeps_error_details(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
     client, store, gateway = app_client
     login(client)
-    job_id = store.create_job(filename="imported.xml", status="imported", plan_id="plan-1", payload={})
-    store.update_job(job_id, status="imported", result={"created_count": 2, "transaction_ids": ["ynab-1", "ynab-2"]})
+    job_id = store.create_job(
+        filename="imported.xml", status="imported", plan_id="plan-1", payload={}
+    )
+    store.update_job(
+        job_id,
+        status="imported",
+        result={"created_count": 2, "transaction_ids": ["ynab-1", "ynab-2"]},
+    )
     gateway.delete_errors["ynab-2"] = "boom"
 
     response = client.post(f"/imports/{job_id}/undo", follow_redirects=False)
@@ -1153,7 +1595,10 @@ def test_save_plan_accepts_uuid_like_ids(tmp_path) -> None:
 
     _save_plan(store, gateway, "12345678-1234-5678-1234-567812345678")
 
-    assert store.selected_plan() == ("12345678-1234-5678-1234-567812345678", "Household")
+    assert store.selected_plan() == (
+        "12345678-1234-5678-1234-567812345678",
+        "Household",
+    )
 
 
 def test_format_money_uses_two_decimals_and_swiss_grouping() -> None:

@@ -4,34 +4,34 @@
 <section class="toolbar-section">
   <div>
     <h1>Setup</h1>
-    <p class="muted">Manage YNAB connection, bank-account mappings, and personal import helpers.</p>
+    <p class="muted">Manage {{ backend_label }} connection, bank-account mappings, and personal import helpers.</p>
   </div>
 </section>
 
 {% if error %}
   <div class="alert alert-error">{{ error }}</div>
 {% endif %}
-{% if not ynab_configured %}
-  <div class="alert alert-error">YNAB_ACCESS_TOKEN is not configured.</div>
+{% if not backend_configured %}
+  <div class="alert alert-error">{{ backend_label }} is not configured.</div>
 {% endif %}
 
 <section class="setup-section">
   <div class="setup-section-header">
-    <h2>YNAB</h2>
-    <p class="muted">Choose the plan and connect bank account identifiers to YNAB accounts.</p>
+    <h2>{{ backend_label }}</h2>
+    <p class="muted">Choose the budget and connect bank account identifiers to {{ backend_label }} accounts.</p>
   </div>
   <form class="settings-row plan-selector" method="post" action="{{ url_path_for('setup') }}">
     <input type="hidden" name="action" value="plan">
     <label class="plan-selector-field">
-      <span>Plan</span>
+      <span>Budget</span>
       <select name="plan_id" required>
-        <option value="">Select a plan</option>
+        <option value="">Select a budget</option>
         {% for plan in plans %}
           <option value="{{ plan.id }}" {% if plan.id == selected_plan_id %}selected{% endif %}>{{ plan.name }}</option>
         {% endfor %}
       </select>
     </label>
-    <button type="submit">Save plan</button>
+    <button type="submit">Save budget</button>
   </form>
 </section>
 
@@ -49,9 +49,9 @@
       </div>
     </div>
     {% if not selected_plan_id %}
-      <p class="muted">Select a plan before adding mappings.</p>
+      <p class="muted">Select a budget before adding mappings.</p>
     {% elif not accounts %}
-      <p class="muted">No active YNAB accounts are available.</p>
+      <p class="muted">No active {{ backend_label }} accounts are available.</p>
     {% elif observed_account_suggestions %}
       <div class="mapping-list">
         {% for observed in observed_account_suggestions %}
@@ -94,7 +94,7 @@
           <input name="iban" placeholder="CH..." required>
         </label>
         <label class="grow">
-          <span>YNAB account</span>
+          <span>{{ backend_label }} account</span>
           <select name="ynab_account_id" required>
             <option value="">Select an account</option>
             {% for account in accounts %}
@@ -105,7 +105,7 @@
         <button type="submit">Add mapping</button>
       </form>
     {% else %}
-      <p class="muted">Select a plan before adding manual mappings.</p>
+      <p class="muted">Select a budget before adding manual mappings.</p>
     {% endif %}
   </section>
 
@@ -117,7 +117,7 @@
           <thead>
             <tr>
               <th>IBAN</th>
-              <th>YNAB account</th>
+              <th>{{ backend_label }} account</th>
               <th></th>
             </tr>
           </thead>
@@ -125,7 +125,7 @@
             {% for mapping in mappings %}
               <tr>
                 <td data-label="IBAN">{{ mapping.iban }}</td>
-                <td data-label="YNAB account">{{ mapping.ynab_account_name }}</td>
+                <td data-label="{{ backend_label }} account">{{ mapping.ynab_account_name }}</td>
                 <td class="right" data-label="">
                   <form method="post" action="{{ url_path_for('setup') }}">
                     <input type="hidden" name="action" value="delete_mapping">
@@ -175,7 +175,7 @@
 
     <section class="panel form-stack compact-panel">
       <h3>Counterparty label</h3>
-      <p class="muted">Label accounts outside uploaded YNAB accounts, such as pension, mortgage, or another bank.</p>
+      <p class="muted">Label accounts outside uploaded accounts, such as pension, mortgage, or another bank.</p>
       <form class="counterparty-label-form" method="post" action="{{ url_path_for('setup') }}">
         <input type="hidden" name="action" value="counterparty_mapping">
         <label class="grow">

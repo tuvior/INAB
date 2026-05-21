@@ -32,7 +32,9 @@ class TransferPair:
         }
 
 
-def detect_transfer_pairs(transactions: list[BankTransaction], *, max_days: int = 3) -> list[TransferPair]:
+def detect_transfer_pairs(
+    transactions: list[BankTransaction], *, max_days: int = 3
+) -> list[TransferPair]:
     debits = [tx for tx in transactions if tx.amount < 0]
     credits = [tx for tx in transactions if tx.amount > 0]
     debit_candidates: dict[str, list[tuple[BankTransaction, int]]] = {}
@@ -67,7 +69,9 @@ def detect_transfer_pairs(transactions: list[BankTransaction], *, max_days: int 
             continue
         used_debits.add(debit.import_id)
         used_credits.add(credit.import_id)
-        pair_id = hashlib.sha1(f"{debit.import_id}|{credit.import_id}".encode("utf-8")).hexdigest()[:12]
+        pair_id = hashlib.sha1(
+            f"{debit.import_id}|{credit.import_id}".encode("utf-8")
+        ).hexdigest()[:12]
         pairs.append(
             TransferPair(
                 id=f"tr_{pair_id}",
@@ -91,4 +95,8 @@ def _date_distance(left: BankTransaction, right: BankTransaction) -> int:
         left_dates.append(left.value_date)
     if right.value_date:
         right_dates.append(right.value_date)
-    return min(abs((left_date - right_date).days) for left_date in left_dates for right_date in right_dates)
+    return min(
+        abs((left_date - right_date).days)
+        for left_date in left_dates
+        for right_date in right_dates
+    )

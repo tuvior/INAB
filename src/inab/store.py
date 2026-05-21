@@ -22,6 +22,14 @@ class AccountMapping:
     transfer_payee_id: str | None
     updated_at: str
 
+    @property
+    def account_id(self) -> str:
+        return self.ynab_account_id
+
+    @property
+    def account_name(self) -> str:
+        return self.ynab_account_name
+
 
 @dataclass(frozen=True)
 class CounterpartyAccountMapping:
@@ -63,8 +71,7 @@ class Store:
 
     def init(self) -> None:
         with self.connect() as connection:
-            connection.executescript(
-                """
+            connection.executescript("""
                 create table if not exists app_config (
                     key text primary key,
                     value text not null
@@ -133,12 +140,13 @@ class Store:
                     created_at text not null,
                     updated_at text not null
                 );
-                """
-            )
+                """)
 
     def get_config(self, key: str) -> str | None:
         with self.connect() as connection:
-            row = connection.execute("select value from app_config where key = ?", (key,)).fetchone()
+            row = connection.execute(
+                "select value from app_config where key = ?", (key,)
+            ).fetchone()
             return row["value"] if row else None
 
     def set_config(self, key: str, value: str) -> None:
@@ -195,16 +203,41 @@ class Store:
                     transfer_payee_id = excluded.transfer_payee_id,
                     updated_at = excluded.updated_at
                 """,
-                (iban.strip().upper(), ynab_account_id, ynab_account_name, transfer_payee_id, now_iso()),
+                (
+                    iban.strip().upper(),
+                    ynab_account_id,
+                    ynab_account_name,
+                    transfer_payee_id,
+                    now_iso(),
+                ),
             )
+
+    def upsert_account_mapping(
+        self,
+        *,
+        iban: str,
+        account_id: str,
+        account_name: str,
+        transfer_payee_id: str | None,
+    ) -> None:
+        self.upsert_mapping(
+            iban=iban,
+            ynab_account_id=account_id,
+            ynab_account_name=account_name,
+            transfer_payee_id=transfer_payee_id,
+        )
 
     def delete_mapping(self, iban: str) -> None:
         with self.connect() as connection:
-            connection.execute("delete from account_mappings where iban = ?", (iban.strip().upper(),))
+            connection.execute(
+                "delete from account_mappings where iban = ?", (iban.strip().upper(),)
+            )
 
     def list_mappings(self) -> list[AccountMapping]:
         with self.connect() as connection:
-            rows = connection.execute("select * from account_mappings order by iban").fetchall()
+            rows = connection.execute(
+                "select * from account_mappings order by iban"
+            ).fetchall()
         return [
             AccountMapping(
                 iban=row["iban"],
@@ -236,7 +269,9 @@ class Store:
             for row in rows
         }
 
-    def observe_account(self, *, iban: str, currency: str, owner_name: str | None, bank_name: str | None) -> None:
+    def observe_account(
+        self, *, iban: str, currency: str, owner_name: str | None, bank_name: str | None
+    ) -> None:
         with self.connect() as connection:
             connection.execute(
                 """
@@ -253,7 +288,9 @@ class Store:
 
     def list_observed_accounts(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
-            rows = connection.execute("select * from observed_accounts order by last_seen_at desc").fetchall()
+            rows = connection.execute(
+                "select * from observed_accounts order by last_seen_at desc"
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def dismiss_observed_account(self, iban: str) -> None:
@@ -269,10 +306,14 @@ class Store:
 
     def dismissed_observed_account_ibans(self) -> set[str]:
         with self.connect() as connection:
-            rows = connection.execute("select iban from dismissed_observed_accounts").fetchall()
+            rows = connection.execute(
+                "select iban from dismissed_observed_accounts"
+            ).fetchall()
         return {row["iban"] for row in rows}
 
-    def observe_counterparty_account(self, *, iban: str, name: str | None, bank_name: str | None) -> None:
+    def observe_counterparty_account(
+        self, *, iban: str, name: str | None, bank_name: str | None
+    ) -> None:
         with self.connect() as connection:
             connection.execute(
                 """
@@ -288,7 +329,9 @@ class Store:
 
     def list_observed_counterparty_accounts(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
-            rows = connection.execute("select * from observed_counterparty_accounts order by last_seen_at desc").fetchall()
+            rows = connection.execute(
+                "select * from observed_counterparty_accounts order by last_seen_at desc"
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def dismiss_observed_counterparty_account(self, iban: str) -> None:
@@ -304,7 +347,9 @@ class Store:
 
     def dismissed_observed_counterparty_ibans(self) -> set[str]:
         with self.connect() as connection:
-            rows = connection.execute("select iban from dismissed_observed_counterparty_accounts").fetchall()
+            rows = connection.execute(
+                "select iban from dismissed_observed_counterparty_accounts"
+            ).fetchall()
         return {row["iban"] for row in rows}
 
     def upsert_counterparty_mapping(self, *, iban: str, label: str) -> None:
@@ -322,11 +367,16 @@ class Store:
 
     def delete_counterparty_mapping(self, iban: str) -> None:
         with self.connect() as connection:
-            connection.execute("delete from counterparty_account_mappings where iban = ?", (iban.strip().upper(),))
+            connection.execute(
+                "delete from counterparty_account_mappings where iban = ?",
+                (iban.strip().upper(),),
+            )
 
     def list_counterparty_mappings(self) -> list[CounterpartyAccountMapping]:
         with self.connect() as connection:
-            rows = connection.execute("select * from counterparty_account_mappings order by label, iban").fetchall()
+            rows = connection.execute(
+                "select * from counterparty_account_mappings order by label, iban"
+            ).fetchall()
         return [
             CounterpartyAccountMapping(
                 iban=row["iban"],
@@ -336,7 +386,9 @@ class Store:
             for row in rows
         ]
 
-    def counterparty_mappings_for(self, ibans: set[str]) -> dict[str, CounterpartyAccountMapping]:
+    def counterparty_mappings_for(
+        self, ibans: set[str]
+    ) -> dict[str, CounterpartyAccountMapping]:
         if not ibans:
             return {}
         placeholders = ",".join("?" for _ in ibans)
@@ -368,7 +420,9 @@ class Store:
         rule_id = uuid.uuid4().hex
         timestamp = now_iso()
         with self.connect() as connection:
-            row = connection.execute("select coalesce(max(priority), 0) as max_priority from import_rules").fetchone()
+            row = connection.execute(
+                "select coalesce(max(priority), 0) as max_priority from import_rules"
+            ).fetchone()
             priority = int(row["max_priority"] or 0) + 100
             connection.execute(
                 """
@@ -439,7 +493,9 @@ class Store:
         if direction not in {"up", "down"}:
             return
         with self.connect() as connection:
-            current = connection.execute("select id, priority from import_rules where id = ?", (rule_id,)).fetchone()
+            current = connection.execute(
+                "select id, priority from import_rules where id = ?", (rule_id,)
+            ).fetchone()
             if not current:
                 return
             comparator = "<" if direction == "up" else ">"
@@ -456,8 +512,14 @@ class Store:
             if not swap:
                 return
             timestamp = now_iso()
-            connection.execute("update import_rules set priority = ?, updated_at = ? where id = ?", (swap["priority"], timestamp, current["id"]))
-            connection.execute("update import_rules set priority = ?, updated_at = ? where id = ?", (current["priority"], timestamp, swap["id"]))
+            connection.execute(
+                "update import_rules set priority = ?, updated_at = ? where id = ?",
+                (swap["priority"], timestamp, current["id"]),
+            )
+            connection.execute(
+                "update import_rules set priority = ?, updated_at = ? where id = ?",
+                (current["priority"], timestamp, swap["id"]),
+            )
 
     def list_rules(self, *, enabled_only: bool = False) -> list[ImportRule]:
         sql = "select * from import_rules"
@@ -470,7 +532,14 @@ class Store:
             rows = connection.execute(sql, params).fetchall()
         return [_rule_from_row(row) for row in rows]
 
-    def create_job(self, *, filename: str, status: str, plan_id: str | None, payload: dict[str, Any]) -> str:
+    def create_job(
+        self,
+        *,
+        filename: str,
+        status: str,
+        plan_id: str | None,
+        payload: dict[str, Any],
+    ) -> str:
         job_id = uuid.uuid4().hex
         timestamp = now_iso()
         with self.connect() as connection:
@@ -480,13 +549,23 @@ class Store:
                     (id, filename, status, plan_id, payload_json, created_at, updated_at)
                 values (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (job_id, filename, status, plan_id, json.dumps(payload), timestamp, timestamp),
+                (
+                    job_id,
+                    filename,
+                    status,
+                    plan_id,
+                    json.dumps(payload),
+                    timestamp,
+                    timestamp,
+                ),
             )
         return job_id
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         with self.connect() as connection:
-            row = connection.execute("select * from import_jobs where id = ?", (job_id,)).fetchone()
+            row = connection.execute(
+                "select * from import_jobs where id = ?", (job_id,)
+            ).fetchone()
         if not row:
             return None
         return _job_from_row(row)
@@ -514,13 +593,27 @@ class Store:
                 """,
                 (cutoff,),
             ).fetchall()
-            stale_ids = [row["id"] for row in rows if not _result_created_transaction_ids(row["result_json"])]
+            stale_ids = [
+                row["id"]
+                for row in rows
+                if not _result_created_transaction_ids(row["result_json"])
+            ]
             if stale_ids:
                 placeholders = ",".join("?" for _ in stale_ids)
-                connection.execute(f"delete from import_jobs where id in ({placeholders})", tuple(stale_ids))
+                connection.execute(
+                    f"delete from import_jobs where id in ({placeholders})",
+                    tuple(stale_ids),
+                )
         return len(stale_ids)
 
-    def update_job(self, job_id: str, *, status: str, payload: dict[str, Any] | None = None, result: dict[str, Any] | None = None) -> None:
+    def update_job(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        payload: dict[str, Any] | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> None:
         assignments = ["status = ?", "updated_at = ?"]
         values: list[Any] = [status, now_iso()]
         if payload is not None:
@@ -552,10 +645,14 @@ def _result_created_transaction_ids(result_json: str | None) -> list[str]:
         result = json.loads(result_json)
     except json.JSONDecodeError:
         return []
-    transaction_ids = result.get("transaction_ids") if isinstance(result, dict) else None
+    transaction_ids = (
+        result.get("transaction_ids") if isinstance(result, dict) else None
+    )
     if not isinstance(transaction_ids, list):
         return []
-    return [str(transaction_id) for transaction_id in transaction_ids if str(transaction_id)]
+    return [
+        str(transaction_id) for transaction_id in transaction_ids if str(transaction_id)
+    ]
 
 
 def _rule_from_row(row: sqlite3.Row) -> ImportRule:

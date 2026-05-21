@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Preview - INAB{% endblock %}
 {% block content %}
+{% set result_backend_label = job.result.backend_label|default(job.payload.backend_label|default(backend_label, true), true) %}
 <section class="toolbar-section">
   <div>
     <h1>{{ job.filename }}</h1>
@@ -31,7 +32,7 @@
       </div>
     {% else %}
       <div class="alert alert-ok">
-        Undo deleted {{ job.result.undo.deleted_transaction_ids|length }} YNAB transaction{% if job.result.undo.deleted_transaction_ids|length != 1 %}s{% endif %}.
+        Undo deleted {{ job.result.undo.deleted_transaction_ids|length }} {{ result_backend_label }} transaction{% if job.result.undo.deleted_transaction_ids|length != 1 %}s{% endif %}.
       </div>
     {% endif %}
   {% endif %}
@@ -41,7 +42,7 @@
     {% endfor %}
   {% else %}
     <div class="alert alert-ok">
-      Submitted {{ result_attempted_count }} bank row{% if result_attempted_count != 1 %}s{% endif %} to YNAB. YNAB returned {{ result_transaction_ids|length }} saved transaction ID{% if result_transaction_ids|length != 1 %}s{% endif %}. Skipped {{ result_skipped_duplicates|length }} duplicate{% if result_skipped_duplicates|length != 1 %}s{% endif %} and {{ result_skipped_transfer_counterparts|length }} opposite-side transfer row{% if result_skipped_transfer_counterparts|length != 1 %}s{% endif %}.
+      Submitted {{ result_attempted_count }} bank row{% if result_attempted_count != 1 %}s{% endif %} to {{ result_backend_label }}. {{ result_backend_label }} returned {{ result_transaction_ids|length }} saved transaction ID{% if result_transaction_ids|length != 1 %}s{% endif %}. Skipped {{ result_skipped_duplicates|length }} duplicate{% if result_skipped_duplicates|length != 1 %}s{% endif %} and {{ result_skipped_transfer_counterparts|length }} opposite-side transfer row{% if result_skipped_transfer_counterparts|length != 1 %}s{% endif %}.
     </div>
   {% endif %}
 {% endif %}
@@ -51,14 +52,14 @@
     <div class="panel-heading">
       <div>
         <h2>Import result</h2>
-        <p class="muted">YNAB saved IDs can include imported rows, matched existing transactions, and transfer counterparts.</p>
+        <p class="muted">{{ result_backend_label }} saved IDs can include imported rows, matched existing transactions, and transfer counterparts.</p>
       </div>
     </div>
     <div class="summary-grid result-summary-grid">
       <div><span class="muted">Bank rows submitted</span><strong>{{ result_attempted_count }}</strong></div>
-      <div><span class="muted">YNAB saved IDs</span><strong>{{ result_transaction_ids|length }}</strong></div>
-      <div><span class="muted">Matched existing</span><strong>{{ job.result.ynab_matched_count|default(0, true) }}</strong></div>
-      <div><span class="muted">YNAB transfer counterparts</span><strong>{{ job.result.ynab_transfer_counterpart_count|default(0, true) }}</strong></div>
+      <div><span class="muted">{{ result_backend_label }} saved IDs</span><strong>{{ result_transaction_ids|length }}</strong></div>
+      <div><span class="muted">Matched existing</span><strong>{{ job.result.backend_matched_count|default(0, true) }}</strong></div>
+      <div><span class="muted">{{ result_backend_label }} transfer counterparts</span><strong>{{ job.result.backend_transfer_counterpart_count|default(0, true) }}</strong></div>
       <div><span class="muted">Duplicates skipped</span><strong>{{ result_skipped_duplicates|length }}</strong></div>
       <div><span class="muted">Transfer rows skipped</span><strong>{{ result_skipped_transfer_counterparts|length }}</strong></div>
     </div>
@@ -97,8 +98,8 @@
         </table>
       </div>
     {% endif %}
-    {% if job.result.ynab_transactions %}
-      <h3 class="result-table-heading">Transactions returned by YNAB</h3>
+    {% if job.result.backend_transactions %}
+      <h3 class="result-table-heading">Transactions returned by {{ result_backend_label }}</h3>
       <div class="table-wrap mobile-card-wrap">
         <table class="mobile-card-table transaction-table">
           <thead>
@@ -108,11 +109,11 @@
               <th>Payee</th>
               <th class="right">Amount</th>
               <th>Import ID</th>
-              <th>YNAB ID</th>
+              <th>{{ result_backend_label }} ID</th>
             </tr>
           </thead>
           <tbody>
-            {% for row in job.result.ynab_transactions %}
+            {% for row in job.result.backend_transactions %}
               <tr>
                 <td data-label="Date">{{ row.date or "" }}</td>
                 <td data-label="Account">{{ row.account_name or row.account_id }}</td>
@@ -122,7 +123,7 @@
                     <span class="muted block">Matched existing transaction: {{ row.matched_transaction_id }}</span>
                   {% endif %}
                   {% if row.transfer_transaction_id %}
-                    <span class="muted block">YNAB transfer counterpart: {{ row.transfer_transaction_id }}</span>
+                    <span class="muted block">{{ result_backend_label }} transfer counterpart: {{ row.transfer_transaction_id }}</span>
                   {% endif %}
                   {% if row.category_name %}
                     <span class="muted block">Category: {{ row.category_name }}</span>
@@ -130,26 +131,26 @@
                 </td>
                 <td class="right amount {% if row.amount|string|first == '-' %}negative{% else %}positive{% endif %}" data-label="Amount">{% if row.amount %}{{ row.amount|money }}{% endif %}</td>
                 <td class="mono" data-label="Import ID">{{ row.import_id or "" }}</td>
-                <td class="mono" data-label="YNAB ID">{{ row.id }}</td>
+                <td class="mono" data-label="{{ result_backend_label }} ID">{{ row.id }}</td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     {% else %}
-      <h3 class="result-table-heading">Saved IDs returned by YNAB</h3>
+      <h3 class="result-table-heading">Saved IDs returned by {{ result_backend_label }}</h3>
       <p class="muted">Transaction details were not available in this response.</p>
       <div class="table-wrap mobile-card-wrap">
         <table class="mobile-card-table">
           <thead>
             <tr>
-              <th>YNAB ID</th>
+              <th>{{ result_backend_label }} ID</th>
             </tr>
           </thead>
           <tbody>
             {% for transaction_id in job.result.transaction_ids %}
               <tr>
-                <td class="mono" data-label="YNAB ID">{{ transaction_id }}</td>
+                <td class="mono" data-label="{{ result_backend_label }} ID">{{ transaction_id }}</td>
               </tr>
             {% endfor %}
           </tbody>
@@ -163,7 +164,7 @@
   <section class="panel undo-panel">
     <div>
       <h2>Undo import</h2>
-      <p class="muted">Delete only the YNAB transactions created by this import.</p>
+      <p class="muted">Delete only the {{ result_backend_label }} transactions created by this import.</p>
     </div>
     <form method="post" action="{{ url_path_for('undo_import', job_id=job.id) }}">
       <button class="secondary danger" type="submit">Undo import</button>
@@ -208,7 +209,7 @@
   <div class="panel">
     <h2>Accounts</h2>
     <p class="metric">{{ job.payload.statements|length }}</p>
-    <p class="muted">{{ job.payload.selected_plan_name or "No plan selected" }}</p>
+    <p class="muted">{{ job.payload.selected_plan_name or "No budget selected" }}</p>
   </div>
   <div class="panel">
     <h2>Transfers</h2>
@@ -222,7 +223,7 @@
   <div class="panel-heading">
     <div>
       <h2>Import summary</h2>
-      <p class="muted">Final totals before sending ready rows to YNAB.</p>
+      <p class="muted">Final totals before sending ready rows to {{ job.payload.backend_label|default(backend_label, true) }}.</p>
     </div>
   </div>
   <div class="summary-grid">
@@ -308,7 +309,7 @@
     </section>
   {% endif %}
   <div class="sticky-actions">
-    <button type="submit">Import to YNAB</button>
+    <button type="submit">Import to {{ result_backend_label }}</button>
   </div>
 </form>
 {% endif %}

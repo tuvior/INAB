@@ -8,8 +8,20 @@ from conftest import tx
 def test_detects_unambiguous_internal_transfer() -> None:
     pairs = detect_transfer_pairs(
         [
-            tx("debit", "CH111", "-250.00", booking_date="2026-04-10", value_date="2026-04-10"),
-            tx("credit", "CH222", "250.00", booking_date="2026-04-12", value_date="2026-04-12"),
+            tx(
+                "debit",
+                "CH111",
+                "-250.00",
+                booking_date="2026-04-10",
+                value_date="2026-04-10",
+            ),
+            tx(
+                "credit",
+                "CH222",
+                "250.00",
+                booking_date="2026-04-12",
+                value_date="2026-04-12",
+            ),
         ]
     )
 

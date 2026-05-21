@@ -4,29 +4,29 @@
 <section class="toolbar-section">
   <div>
     <h1>Import bank statements</h1>
-    <p class="muted">CAMT.053 XML and supported CSV exports are parsed locally, previewed, then sent to YNAB after confirmation.</p>
+    <p class="muted">CAMT.053 XML and supported CSV exports are parsed locally, previewed, then sent to {{ backend_label }} after confirmation.</p>
   </div>
   <a class="button secondary" href="{{ url_path_for('setup') }}">Setup</a>
 </section>
 
 <section class="status-grid">
   <div class="panel">
-    <h2>YNAB</h2>
-    {% if ynab_configured %}
-      <p class="status ok">Token configured</p>
+    <h2>{{ backend_label }}</h2>
+    {% if backend_configured %}
+      <p class="status ok">Configured</p>
     {% else %}
-      <p class="status bad">Missing YNAB_ACCESS_TOKEN</p>
+      <p class="status bad">{{ backend_label }} is not configured</p>
     {% endif %}
     {% if selected_plan_id %}
       <p>{{ selected_plan_name }}</p>
     {% else %}
-      <p class="muted">No YNAB plan selected.</p>
+      <p class="muted">No {{ backend_label }} budget selected.</p>
     {% endif %}
   </div>
   <div class="panel">
     <h2>Mappings</h2>
     <p class="metric">{{ mappings|length }}</p>
-    <p class="muted">IBAN to YNAB account mappings</p>
+    <p class="muted">IBAN to {{ backend_label }} account mappings</p>
   </div>
   <div class="panel">
     <h2>Seen accounts</h2>
@@ -52,7 +52,7 @@
       <label>
         <span>CSV target account</span>
         <select id="csv-account-select" name="csv_ynab_account_id">
-          <option value="">Select the YNAB account for this CSV</option>
+          <option value="">Select the {{ backend_label }} account for this CSV</option>
           {% for account in accounts %}
             <option value="{{ account.id }}">{{ account.name }}</option>
           {% endfor %}
@@ -71,14 +71,14 @@
       <thead>
         <tr>
           <th>IBAN</th>
-          <th>YNAB account</th>
+          <th>{{ backend_label }} account</th>
         </tr>
       </thead>
       <tbody>
         {% for mapping in mappings %}
           <tr>
             <td data-label="IBAN">{{ mapping.iban }}</td>
-            <td data-label="YNAB account">{{ mapping.ynab_account_name }}</td>
+            <td data-label="{{ backend_label }} account">{{ mapping.ynab_account_name }}</td>
           </tr>
         {% endfor %}
       </tbody>

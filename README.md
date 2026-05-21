@@ -1,8 +1,8 @@
 # INAB
 
-Import Swiss bank statements into YNAB from a self-hosted web app.
+Import Swiss bank statements into YNAB or Actual Budget from a self-hosted web app.
 
-INAB parses CAMT.053 XML and supported CSV exports locally, lets you review them, then creates the confirmed transactions in YNAB.
+INAB parses CAMT.053 XML and supported CSV exports locally, lets you review them, then creates the confirmed transactions in the configured budget backend.
 
 ![INAB import preview](docs/assets/inab-preview.png)
 
@@ -13,16 +13,16 @@ INAB parses CAMT.053 XML and supported CSV exports locally, lets you review them
 1. Export a CAMT.053 XML file or supported CSV file from your bank.
 2. Upload it to INAB. Parsing, rules, duplicate checks, and transfer detection run locally.
 3. Review the preview screen.
-4. Import approved rows to YNAB through `TransactionsApi.create_transaction`.
+4. Import approved rows to the configured budget backend.
 
 ## What It Does
 
 - Imports Swiss CAMT.053 account statements and supported semicolon CSV exports.
 - Handles multi-account CAMT files with one or more `<Stmt>` blocks.
-- Stores IBAN-to-YNAB account mappings in local SQLite.
+- Stores IBAN-to-budget-account mappings in local SQLite.
 - Previews rows before import, including reconciliation totals and duplicate matches.
 - Detects likely internal transfers between mapped accounts.
-- Uses deterministic YNAB `import_id` values to avoid repeat imports.
+- Uses deterministic INAB import IDs to avoid repeat imports.
 - Keeps import history and can undo transactions created by INAB.
 
 ## Supported Banks And Formats
@@ -39,15 +39,16 @@ INAB parses CAMT.053 XML and supported CSV exports locally, lets you review them
 uv sync --extra dev
 
 export YNAB_ACCESS_TOKEN="..."
+export INAB_BACKEND="ynab"
 export INAB_USERNAME="inab"
 export INAB_PASSWORD="choose-a-password"
 
 uv run uvicorn inab.web:create_app --factory --reload
 ```
 
-Open <http://127.0.0.1:8000> and sign in. Choose your YNAB plan in Setup, then upload a CAMT.053 XML file once so INAB can discover IBANs. Map each discovered IBAN to a YNAB account, upload again, review the preview, and import.
+Open <http://127.0.0.1:8000> and sign in. Choose your budget in Setup, then upload a CAMT.053 XML file once so INAB can discover IBANs. Map each discovered IBAN to a budget account, upload again, review the preview, and import.
 
-For CSV uploads, choose the target YNAB account on the upload form. The supported CSV format does not include an account identifier.
+For CSV uploads, choose the target budget account on the upload form. The supported CSV format does not include an account identifier.
 
 ## Privacy And Data
 
@@ -59,23 +60,27 @@ Stored locally:
 - import rules
 - import history
 - observed IBANs and counterparty labels
-- YNAB transaction IDs created by INAB, used for undo
+- transaction IDs created by INAB, used for undo
 
-Sent to YNAB:
+Sent to the configured backend:
 
 - transactions you confirm for import
-- account, plan, payee, and category lookups needed by the UI
+- account, budget, payee, and category lookups needed by the UI
 
 Not stored in SQLite:
 
 - `YNAB_ACCESS_TOKEN`, which stays in your deployment environment
+- `ACTUAL_PASSWORD` and `ACTUAL_ENCRYPTION_PASSWORD`, which stay in your deployment environment
 - the uploaded bank file itself
+
+Backend-specific local state is stored separately by default: `INAB_DATA_DIR/ynab/inab.sqlite3` or `INAB_DATA_DIR/actual/inab.sqlite3`. `ACTUAL_DATA_DIR` is only actualpy's local cache for the downloaded Actual budget, not INAB's rules or mappings database.
 
 ## Docker
 
 ```sh
 docker build -t inab .
 docker run --rm -p 8000:8000 \
+  -e INAB_BACKEND="ynab" \
   -e YNAB_ACCESS_TOKEN="$YNAB_ACCESS_TOKEN" \
   -e INAB_USERNAME="inab" \
   -e INAB_PASSWORD="choose-a-password" \
@@ -87,10 +92,37 @@ If you expose INAB outside localhost, put it behind HTTPS. Keep `/data` on persi
 
 ## Configuration
 
-Required:
+Backend selection:
+
+```sh
+INAB_BACKEND="ynab"  # or "actual"
+```
+
+Required for YNAB:
 
 ```sh
 YNAB_ACCESS_TOKEN="..."
+```
+
+Required for Actual Budget:
+
+```sh
+ACTUAL_BASE_URL="https://actual.example"
+ACTUAL_PASSWORD="..."
+ACTUAL_BUDGET="Household"
+```
+
+Actual optional settings:
+
+```sh
+ACTUAL_ENCRYPTION_PASSWORD=""
+ACTUAL_DATA_DIR="./data/actual-cache"
+ACTUAL_VERIFY_SSL="true"  # true, false, or a certificate path
+```
+
+Shared required:
+
+```sh
 INAB_USERNAME="inab"
 INAB_PASSWORD="choose-a-password"
 ```
@@ -99,6 +131,7 @@ Optional:
 
 ```sh
 INAB_DATA_DIR="./data"
+INAB_DATABASE_PATH="./data/custom-inab.sqlite3"
 INAB_SESSION_SECRET="stable-cookie-signing-secret"
 INAB_MAX_UPLOAD_BYTES="10485760"
 INAB_TARGET_CURRENCY="CHF"
@@ -110,24 +143,31 @@ Set `INAB_ROOT_PATH` only when publishing the app under a URL prefix such as `ht
 
 ## Import Rules
 
-INAB can rewrite payees and assign YNAB categories before import. Rules are edited in the web UI and stored in SQLite. The preview shows the original payee, matched rule, and assigned category before import.
+INAB can rewrite payees and assign backend categories before import. Rules are edited in the web UI and stored in SQLite. The preview shows the original payee, matched rule, and assigned category before import.
 
 ## Actual Budget Analysis
 
-See [docs/actual-budget-analysis.md](docs/actual-budget-analysis.md) for an assessment of adding Actual Budget as an alternative backend through `actualpy`.
+See [docs/actual-budget-analysis.md](docs/actual-budget-analysis.md) for the design reference for Actual Budget support through `actualpy`.
 
 ## Import Behavior
 
-- CAMT `DBIT` entries become negative YNAB amounts; `CRDT` entries become positive amounts.
+- CAMT `DBIT` entries become negative amounts; `CRDT` entries become positive amounts.
 - CSV `Amount` values are already signed.
-- Amounts are converted to YNAB milliunits with `Decimal * 1000`.
-- Imported transactions are created with `cleared="cleared"` and `approved=false`.
+- YNAB amounts are converted to milliunits with `Decimal * 1000`; Actual Budget receives decimal amounts through actualpy.
+- Imported transactions are marked cleared where the backend supports it.
 - `AcctSvcrRef` becomes `INAB:<AcctSvcrRef>` when it fits YNAB's 36-character import ID limit.
 - Rows without a usable bank reference get a deterministic hash-based `INAB:<hash>` import ID.
-- Before import, INAB fetches existing YNAB transactions for each mapped account and skips matching import IDs.
+- Before import, INAB fetches existing backend transactions for each mapped account and skips matching import IDs.
 - YNAB can match an INAB-imported row to a user-entered transaction on the same account with the same amount and a date within 10 days.
-- Transfer pairs are imported once from the debit-side account using the target account's `transfer_payee_id`.
-- Preview, blocked, and failed jobs without created YNAB transaction IDs are pruned after 7 days.
+- Actual Budget duplicate preview compares Actual `financial_id` / imported IDs against INAB import IDs.
+- YNAB transfer pairs are imported once from the debit-side account using the target account's `transfer_payee_id`.
+- Actual Budget transfer pairs are created with actualpy `create_transfer`; INAB sets import IDs on both generated sides for future duplicate detection.
+- Preview, blocked, and failed jobs without created transaction IDs are pruned after 7 days.
+
+Known Actual Budget limitations:
+
+- Undo uses actualpy's transaction delete helper when present, otherwise marks the transaction tombstoned, then commits. This is covered by unit tests but should still be verified against a disposable hosted Actual budget before production use.
+- actualpy sync commits are not atomic if interrupted.
 
 ## YNAB API
 
