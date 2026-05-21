@@ -430,6 +430,40 @@ def test_twint_payment_memo_is_compact_and_single_line() -> None:
     assert tx.value_date == date(2026, 3, 31)
 
 
+def test_twint_payment_without_timestamp_omits_bank_noise() -> None:
+    entry = """
+<Ntry>
+  <Amt Ccy="CHF">119.00</Amt>
+  <CdtDbtInd>DBIT</CdtDbtInd>
+  <RvslInd>false</RvslInd>
+  <Sts><Cd>BOOK</Cd></Sts>
+  <BookgDt><Dt>2026-05-06</Dt></BookgDt>
+  <ValDt><Dt>2026-05-06</Dt></ValDt>
+  <AcctSvcrRef>TWINTREF</AcctSvcrRef>
+  <NtryDtls>
+    <TxDtls>
+      <Amt Ccy="CHF">119.00</Amt>
+      <CdtDbtInd>DBIT</CdtDbtInd>
+      <RltdAgts>
+        <CdtrAgt><FinInstnId><Nm>Raiffeisen Schweiz</Nm></FinInstnId></CdtrAgt>
+      </RltdAgts>
+    </TxDtls>
+  </NtryDtls>
+  <AddtlNtryInf>Achat TWINT DIGITEC GALAXUS</AddtlNtryInf>
+</Ntry>
+"""
+    content = camt_document(
+        statement_xml("CH111", entry, opening="500.00", closing="381.00")
+    )
+
+    result = parse_camt(content)
+    tx = result.transactions[0]
+
+    assert tx.payee == "Digitec Galaxus"
+    assert tx.memo == "TWINT"
+    assert tx.booking_date == date(2026, 5, 6)
+
+
 def test_twint_payment_keeps_legacy_bank_date_fallback_import_id() -> None:
     content = camt_document(
         statement_xml(

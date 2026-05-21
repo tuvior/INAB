@@ -71,6 +71,10 @@ TWINT_PAYMENT_PATTERN = re.compile(
     r"\s*",
     flags=re.IGNORECASE,
 )
+TWINT_DESCRIPTION_PATTERN = re.compile(
+    r"(?P<payment_type>Achat|Paiement|Cr[ée]dit)\s+TWINT(?:\s+.+)?",
+    flags=re.IGNORECASE,
+)
 
 
 def parse_upload(
@@ -800,7 +804,7 @@ def _detail_memo(
     if counterparty_iban:
         parts.append(f"IBAN: {_iban_text(counterparty_iban) or counterparty_iban}")
     counterparty_bank = counterparty["bank"]
-    if counterparty_bank:
+    if counterparty_bank and not _is_compact_payment_description(base_description):
         parts.append(f"Bank: {counterparty_bank}")
     return _memo_from_parts(parts)
 
@@ -836,19 +840,31 @@ def _transaction_booking_date(bank_booking_date: date, description: str) -> date
 
 
 def _twint_payment_memo(description: str) -> str | None:
-    match = TWINT_PAYMENT_PATTERN.fullmatch(normalize_whitespace(description))
-    if not match:
-        return None
-    return f"TWINT: {match.group('date')} {match.group('time')}"
+    normalized = normalize_whitespace(description)
+    match = TWINT_PAYMENT_PATTERN.fullmatch(normalized)
+    if match:
+        return f"TWINT: {match.group('date')} {match.group('time')}"
+    if TWINT_DESCRIPTION_PATTERN.fullmatch(normalized):
+        return "TWINT"
+    return None
 
 
-def _card_payment_date(description: str) -> date | None:
-    match = CARD_PURCHASE_PATTERN.fullmatch(normalize_whitespace(description))
-    return _payment_date_from_match(match)
+def _is_compact_payment_description(description: str) -> bool:
+    normalized = normalize_whitespace(description)
+    if CARD_PURCHASE_PATTERN.fullmatch(normalized):
+        return True
+    if TWINT_DESCRIPTION_PATTERN.fullmatch(normalized):
+        return True
+    return False
 
 
 def _twint_payment_date(description: str) -> date | None:
     match = TWINT_PAYMENT_PATTERN.fullmatch(normalize_whitespace(description))
+    return _payment_date_from_match(match)
+
+
+def _card_payment_date(description: str) -> date | None:
+    match = CARD_PURCHASE_PATTERN.fullmatch(normalize_whitespace(description))
     return _payment_date_from_match(match)
 
 
