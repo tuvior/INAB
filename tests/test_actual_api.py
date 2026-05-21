@@ -23,6 +23,7 @@ class FakeActual:
         return self
 
     def __exit__(self, *args: Any) -> None:
+        self.session.closed = True
         return None
 
     def list_user_files(self) -> Any:
@@ -36,6 +37,7 @@ class FakeActual:
 
 class FakeSession:
     def __init__(self) -> None:
+        self.closed = False
         self.categories = {"cat-food": SimpleNamespace(id="cat-food", tombstone=0)}
         self.transactions = {"tx-1": SimpleNamespace(id="tx-1", tombstone=0)}
 
@@ -100,6 +102,23 @@ class FakeQueries:
             )
         ]
 
+    def get_categories(
+        self, session: FakeSession, *, include_deleted: bool = False
+    ) -> list["FakeCategory"]:
+        return [FakeCategory(session)]
+
+    def get_payees(
+        self, session: FakeSession, *, include_deleted: bool = False
+    ) -> list[SimpleNamespace]:
+        return [
+            SimpleNamespace(
+                id="payee-coop",
+                name="Coop",
+                transfer_acct=None,
+                tombstone=0,
+            )
+        ]
+
     def get_transactions(
         self,
         session: Any,
@@ -158,6 +177,22 @@ class FakeQueries:
         )
 
 
+class FakeCategory:
+    id = "cat-food"
+    name = "Food"
+    hidden = 0
+    tombstone = 0
+
+    def __init__(self, session: FakeSession) -> None:
+        self.session = session
+
+    @property
+    def group(self) -> SimpleNamespace:
+        if self.session.closed:
+            raise RuntimeError("category group was lazy-loaded after session close")
+        return SimpleNamespace(name="Everyday", hidden=0, tombstone=0)
+
+
 def test_actual_gateway_lists_budgets_and_uses_actualpy_cache_dir(
     tmp_path: Path,
 ) -> None:
@@ -188,6 +223,19 @@ def test_actual_duplicate_detection_uses_financial_id(
         "start_date": date(2026, 4, 1),
         "account": "checking-id",
     }
+
+
+def test_actual_gateway_materializes_categories_before_session_closes(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    queries = FakeQueries()
+    monkeypatch.setattr("inab.actual_api._queries", lambda: queries)
+    gateway = _gateway(tmp_path)
+
+    categories = gateway.list_categories("budget-id")
+
+    assert categories[0].id == "cat-food"
+    assert categories[0].group_name == "Everyday"
 
 
 def test_actual_gateway_reconciles_normal_transactions_and_commits(

@@ -54,7 +54,6 @@ class ActualBudgetGateway:
             with self._actual(file=None) as actual:
                 files = actual.list_user_files().data
         except Exception as exc:
-            print(exc)
             raise ActualBudgetError(
                 _safe_error("Could not list Actual Budget files", exc)
             ) from exc
@@ -97,44 +96,23 @@ class ActualBudgetGateway:
                 categories = _queries().get_categories(
                     actual.session, include_deleted=True
                 )
+                return [
+                    _budget_category_from_actual(category) for category in categories
+                ]
         except Exception as exc:
             raise ActualBudgetError(
                 _safe_error("Could not list Actual Budget categories", exc)
             ) from exc
-        return [
-            BudgetCategory(
-                id=str(category.id),
-                name=str(category.name),
-                group_name=str(
-                    getattr(getattr(category, "group", None), "name", "") or ""
-                ),
-                hidden=bool(getattr(category, "hidden", False))
-                or bool(getattr(getattr(category, "group", None), "hidden", False)),
-                deleted=_deleted(category)
-                or _deleted(getattr(category, "group", None)),
-            )
-            for category in categories
-        ]
 
     def list_payees(self, budget_id: str) -> list[BudgetPayee]:
         try:
             with self._actual(file=budget_id) as actual:
                 payees = _queries().get_payees(actual.session, include_deleted=True)
+                return [_budget_payee_from_actual(payee) for payee in payees]
         except Exception as exc:
             raise ActualBudgetError(
                 _safe_error("Could not list Actual Budget payees", exc)
             ) from exc
-        return [
-            BudgetPayee(
-                id=str(payee.id),
-                name=str(payee.name or _transfer_payee_name(payee)),
-                transfer_account_id=_optional_str(
-                    getattr(payee, "transfer_acct", None)
-                ),
-                deleted=_deleted(payee),
-            )
-            for payee in payees
-        ]
 
     def existing_transactions(
         self, budget_id: str, account_id: str, since_date: date | None = None
@@ -284,6 +262,27 @@ def _category_by_id(session: Any, database: Any, category_id: str | None) -> Any
     if category is None or _deleted(category):
         raise ActualBudgetError(f"Actual Budget category {category_id} was not found.")
     return category
+
+
+def _budget_category_from_actual(category: Any) -> BudgetCategory:
+    group = getattr(category, "group", None)
+    return BudgetCategory(
+        id=str(category.id),
+        name=str(category.name),
+        group_name=str(getattr(group, "name", "") or ""),
+        hidden=bool(getattr(category, "hidden", False))
+        or bool(getattr(group, "hidden", False)),
+        deleted=_deleted(category) or _deleted(group),
+    )
+
+
+def _budget_payee_from_actual(payee: Any) -> BudgetPayee:
+    return BudgetPayee(
+        id=str(payee.id),
+        name=str(payee.name or _transfer_payee_name(payee)),
+        transfer_account_id=_optional_str(getattr(payee, "transfer_acct", None)),
+        deleted=_deleted(payee),
+    )
 
 
 def _transaction_date(transaction: Any) -> date | None:
