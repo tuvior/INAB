@@ -112,6 +112,10 @@ Set `INAB_ROOT_PATH` only when publishing the app under a URL prefix such as `ht
 
 INAB can rewrite payees and assign YNAB categories before import. Rules are edited in the web UI and stored in SQLite. The preview shows the original payee, matched rule, and assigned category before import.
 
+## Actual Budget Analysis
+
+See [docs/actual-budget-analysis.md](docs/actual-budget-analysis.md) for an assessment of adding Actual Budget as an alternative backend through `actualpy`.
+
 ## Import Behavior
 
 - CAMT `DBIT` entries become negative YNAB amounts; `CRDT` entries become positive amounts.
