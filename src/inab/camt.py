@@ -559,25 +559,21 @@ def _csv_memo(row: dict[str, str | None]) -> str | None:
     description = normalize_whitespace(row.get("Description"))
     if description:
         parts.append(description)
-    for label, column in (
-        ("Subject", "Subject"),
-        ("Category", "Category"),
-        ("Tags", "Tags"),
-    ):
-        value = normalize_whitespace(row.get(column))
-        if value:
-            parts.append(f"{label}: {value}")
-    original_amount = normalize_whitespace(row.get("Original amount"))
-    original_currency = normalize_whitespace(row.get("Original currency"))
-    exchange_rate = normalize_whitespace(row.get("Exchange rate"))
+    subject = _csv_optional_value(row.get("Subject"))
+    if subject:
+        parts.append(subject)
+    original_amount = _csv_optional_value(row.get("Original amount"))
+    original_currency = _csv_optional_value(row.get("Original currency"))
     if original_amount and original_currency:
-        suffix = f" at {exchange_rate}" if exchange_rate else ""
-        parts.append(f"Original amount: {original_amount} {original_currency}{suffix}")
-    for label, column in (("Wise", "Wise"), ("Spaces", "Spaces")):
-        value = normalize_whitespace(row.get(column))
-        if value:
-            parts.append(f"{label}: {value}")
+        parts.append(f"Original amount: {original_amount} {original_currency}")
     return _memo_from_parts(parts)
+
+
+def _csv_optional_value(value: str | None) -> str:
+    normalized = normalize_whitespace(value)
+    if normalized.casefold() == "no":
+        return ""
+    return normalized
 
 
 def _first_balance(balances: Iterable[Balance], kind: str) -> Balance | None:

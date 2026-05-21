@@ -64,7 +64,7 @@ def test_csv_upload_requires_selected_account() -> None:
 
 def test_supported_csv_export_parses_with_selected_account_key() -> None:
     content = b'''"Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
-"2026-04-30";"600.00";"";"";"";"Alex Example";"";"income";"";"no";"no"
+"2026-04-30";"600.00";"";"";"";"Alex Example";"Salary April";"income";"";"no";"no"
 "2026-04-28";"-16.57";"-17.90";"EUR";"1.08027";"SAMPLE BISTRO";;"food";"";"no";"no"
 '''
 
@@ -79,8 +79,8 @@ def test_supported_csv_export_parses_with_selected_account_key() -> None:
     assert [tx.payee for tx in result.transactions] == ["Alex Example", "Sample Bistro"]
     assert result.transactions[0].import_id.startswith("INAB:")
     assert result.transactions[0].source_ref is None
-    assert "Category: income" in (result.transactions[0].memo or "")
-    assert "Original amount: -17.90 EUR at 1.08027" in (result.transactions[1].memo or "")
+    assert result.transactions[0].memo == "Alex Example; Salary April"
+    assert result.transactions[1].memo == "SAMPLE BISTRO; Original amount: -17.90 EUR"
 
 
 def test_rejects_non_chf_statement() -> None:

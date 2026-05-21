@@ -61,7 +61,7 @@ The newer CSV export has these columns:
 - `Wise`
 - `Spaces`
 
-This CSV is supported because it is the only available export for that bank. The account identifier is not present in the file, so INAB asks for the target YNAB account on each CSV upload. The selected account is used as a temporary account key for preview, duplicate detection, and deterministic import IDs. The `Amount` column is treated as the signed account-currency amount. The original amount, currency, and exchange rate are retained in the memo for FX card transactions.
+This CSV is supported because it is the only available export for that bank. The account identifier is not present in the file, so INAB asks for the target YNAB account on each CSV upload. The selected account is used as a temporary account key for preview, duplicate detection, and deterministic import IDs. The `Amount` column is treated as the signed account-currency amount. CSV memos retain the description, subject when present, and original amount with currency for FX card transactions. Optional `no` values are ignored.
 
 The April CSV sample has 24 transactions, covers 2026-04-03 through 2026-04-30, and includes the expected CHF 600.00 inflow from the Raiffeisen outflow visible in the CAMT sample.
 
