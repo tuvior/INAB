@@ -473,35 +473,49 @@ table {
 
 .history-table th,
 .history-table td {
-  padding-inline: 10px;
+  padding: 12px 14px;
 }
 
 .history-file-col {
-  width: 27%;
+  width: 42%;
 }
 
 .history-status-col {
-  width: 9%;
+  width: 12%;
 }
 
-.history-date-col {
-  width: 14%;
+.history-counts-col {
+  width: 24%;
 }
 
-.history-number-col {
-  width: 7%;
+.history-result-col {
+  width: 12%;
 }
 
 .history-action-col {
-  width: 7%;
+  width: 10%;
 }
 
 .history-file {
-  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
-.history-date {
+.history-file-name {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 650;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.history-meta {
+  margin-top: 4px;
+  font-size: 13px;
+}
+
+.history-counts strong {
+  font-size: 18px;
 }
 
 th,

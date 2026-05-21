@@ -1089,7 +1089,8 @@ def test_import_history_lists_jobs(app_client: tuple[TestClient, Store, FakeGate
     assert "preview.xml" in page.text
     assert "imported.xml" in page.text
     assert "imported" in page.text
-    assert "ynab" not in page.text
+    assert "3</strong> ready" in page.text
+    assert "2</strong> saved IDs" in page.text
 
 
 def test_imported_job_can_be_undone(app_client: tuple[TestClient, Store, FakeGateway]) -> None:

@@ -22,41 +22,44 @@
         <colgroup>
           <col class="history-file-col">
           <col class="history-status-col">
-          <col class="history-date-col">
-          <col class="history-date-col">
-          <col class="history-number-col">
-          <col class="history-number-col">
-          <col class="history-number-col">
-          <col class="history-number-col">
-          <col class="history-number-col">
+          <col class="history-counts-col">
+          <col class="history-result-col">
           <col class="history-action-col">
         </colgroup>
         <thead>
           <tr>
-            <th>File</th>
+            <th>Import</th>
             <th>Status</th>
-            <th>Created</th>
-            <th>Updated</th>
-            <th class="right">Rows</th>
-            <th class="right">Ready</th>
-            <th class="right">Duplicates</th>
-            <th class="right">Transfers</th>
-            <th class="right">Created</th>
+            <th>Preview counts</th>
+            <th>Result</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           {% for job in jobs %}
             <tr>
-              <td class="history-file" data-label="File">{{ job.filename }}</td>
+              <td class="history-file" data-label="Import">
+                <span class="history-file-name" title="{{ job.filename }}">{{ job.filename }}</span>
+                <span class="muted block history-meta">
+                  Created {{ job.created_at[:16]|replace("T", " ") }}
+                  {% if job.updated_at[:16] != job.created_at[:16] %}
+                    · Updated {{ job.updated_at[:16]|replace("T", " ") }}
+                  {% endif %}
+                </span>
+              </td>
               <td data-label="Status"><span class="chip chip-{{ job.status }}">{{ job.status }}</span></td>
-              <td class="mono history-date" data-label="Created">{{ job.created_at[:16]|replace("T", " ") }}</td>
-              <td class="mono history-date" data-label="Updated">{{ job.updated_at[:16]|replace("T", " ") }}</td>
-              <td class="right" data-label="Rows">{{ job.transaction_count }}</td>
-              <td class="right" data-label="Ready">{{ job.ready_count }}</td>
-              <td class="right" data-label="Duplicates">{{ job.duplicate_count }}</td>
-              <td class="right" data-label="Transfers">{{ job.transfer_count }}</td>
-              <td class="right" data-label="Created">{{ job.created_count }}</td>
+              <td class="history-counts" data-label="Preview counts">
+                <strong>{{ job.ready_count }}</strong> ready
+                <span class="muted">of {{ job.transaction_count }} rows</span>
+                <span class="muted block">{{ job.duplicate_count }} duplicate{% if job.duplicate_count != 1 %}s{% endif %}, {{ job.transfer_count }} transfer{% if job.transfer_count != 1 %}s{% endif %}</span>
+              </td>
+              <td data-label="Result">
+                {% if job.created_count %}
+                  <strong>{{ job.created_count }}</strong> saved ID{% if job.created_count != 1 %}s{% endif %}
+                {% else %}
+                  <span class="muted">Not imported</span>
+                {% endif %}
+              </td>
               <td class="right" data-label=""><a class="button secondary" href="{{ url_path_for('import_preview', job_id=job.id) }}">Open</a></td>
             </tr>
           {% endfor %}
