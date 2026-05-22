@@ -43,7 +43,7 @@ Observed fields:
 - `Balance`
 - `Valuta Date`
 
-The Raiffeisen CSV sample has 90 April rows and the same CHF 740.37 total movement as the CAMT sample. Its main drawback is that it has no stable per-transaction bank reference. Duplicate prevention would have to rely on date, amount, payee text, and occurrence counting, which is less robust than CAMT `AcctSvcrRef`. The file is also ISO-8859 text, which adds encoding risk.
+The Raiffeisen CSV sample has 90 April rows and the same CHF 740.37 total movement as the CAMT sample. Its main drawback is that it has no stable per-transaction bank reference. Duplicate prevention would have to rely on date, amount, payee text, and occurrence counting, which is weaker than CAMT `AcctSvcrRef`. The file is also ISO-8859 text, which adds encoding risk.
 
 ## Other-Bank CSV
 

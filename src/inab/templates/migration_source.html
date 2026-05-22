@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Choose YNAB Budget - INAB{% endblock %}
+{% block content %}
+<section class="toolbar-section">
+  <div>
+    <h1>Choose YNAB budget</h1>
+    <p class="muted">INAB will fetch a complete YNAB JSON export for Actual's native nYNAB importer.</p>
+  </div>
+</section>
+
+{% if error %}
+  <div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<section class="panel">
+  <form class="settings-row plan-selector" method="post" action="{{ url_path_for('migration_source') }}">
+    <label class="plan-selector-field">
+      <span>Source budget</span>
+      <select name="source_budget_id" required>
+        <option value="">Select a YNAB budget</option>
+        {% for plan in plans %}
+          <option value="{{ plan.id }}">{{ plan.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" {% if error %}disabled{% endif %}>Generate export</button>
+  </form>
+</section>
+{% endblock %}

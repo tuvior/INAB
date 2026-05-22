@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Analyze YNAB Targets - INAB{% endblock %}
+{% block content %}
+<section class="toolbar-section">
+  <div>
+    <h1>Analyze targets</h1>
+    <p class="muted">{{ migration.source_budget_name }} export is ready for Actual's nYNAB importer.</p>
+  </div>
+  <a class="button secondary" href="{{ url_path_for('migration_export_download', migration_id=migration.id) }}">Download JSON</a>
+</section>
+
+<section class="status-grid">
+  {% for label, value in migration.export_counts.items() %}
+    <div class="panel">
+      <h2>{{ label|replace('_', ' ')|title }}</h2>
+      <p class="metric">{{ value }}</p>
+    </div>
+  {% endfor %}
+</section>
+
+<form method="post" action="{{ url_path_for('migration_analyze', migration_id=migration.id) }}">
+  <section>
+    <div class="panel-heading">
+      <div>
+        <h2>Template proposals</h2>
+        <p class="muted">Accept active lines, keep them as comments, edit them, or skip them.</p>
+      </div>
+    </div>
+    <div class="mapping-list">
+      {% for item in migration.target_items %}
+        {% set decision = migration.decisions.get(item.category_id, {}) %}
+        <div class="panel migration-item">
+          <div class="split-actions">
+            <div>
+              <h3>{{ item.category_group_name }}: {{ item.category_name }}</h3>
+              <p class="muted">{{ item.goal_type }} · {{ item.reason }}</p>
+            </div>
+            <span class="chip chip-{{ item.confidence }}">{{ item.confidence }}</span>
+          </div>
+          <label>
+            <span>Action</span>
+            <select name="action_{{ item.category_id }}">
+              <option value="active" {% if decision.action == 'active' %}selected{% endif %}>Active template line</option>
+              <option value="comment" {% if decision.action == 'comment' %}selected{% endif %}>Comment-only suggestion</option>
+              <option value="skip" {% if decision.action == 'skip' %}selected{% endif %}>Skip</option>
+            </select>
+          </label>
+          <label>
+            <span>Line</span>
+            <input name="line_{{ item.category_id }}" value="{{ decision.line or item.line }}">
+          </label>
+        </div>
+      {% else %}
+        <div class="panel">
+          <p class="muted">No YNAB targets were found in the export.</p>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+  <div class="sticky-actions">
+    <button type="submit">Save target review</button>
+  </div>
+</form>
+{% endblock %}

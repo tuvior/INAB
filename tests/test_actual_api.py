@@ -300,12 +300,65 @@ def test_actual_gateway_creates_transfer_and_sets_both_import_ids(
     assert FakeActual.instances[-1].committed is True
 
 
+def test_actual_gateway_patches_and_rolls_back_category_notes(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    category = SimpleNamespace(id="cat-food", tombstone=0, notes="Existing note")
+
+    class NoteSession(FakeSession):
+        def get(self, model: Any, item_id: str) -> Any:
+            if model is FakeCategories and item_id == "cat-food":
+                return category
+            return None
+
+    class NoteActual(FakeActual):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self.session = NoteSession()
+
+    monkeypatch.setattr("inab.actual_api._database", lambda: FakeDatabase)
+    gateway = ActualBudgetGateway(
+        ActualBudgetSettings(
+            base_url="https://actual.example",
+            password="secret",
+            data_dir=tmp_path / "actual-cache",
+        ),
+        actual_cls=NoteActual,
+    )
+
+    report = gateway.append_category_note_blocks(
+        "budget-id",
+        [
+            {
+                "category_id": "cat-food",
+                "category_name": "Everyday: Food",
+                "block": "<!-- INAB YNAB target migration mig-1 start -->\n#template 25.00\n<!-- INAB YNAB target migration mig-1 end -->",
+            }
+        ],
+        marker="INAB YNAB target migration mig-1",
+    )
+
+    assert report[0]["patched"] is True
+    assert (
+        "Existing note\n\n<!-- INAB YNAB target migration mig-1 start -->"
+        in category.notes
+    )
+    assert FakeActual.instances[-1].committed is True
+
+    rollback = gateway.rollback_category_note_blocks(
+        "budget-id", ["cat-food"], marker="INAB YNAB target migration mig-1"
+    )
+
+    assert rollback[0]["rolled_back"] is True
+    assert category.notes == "Existing note"
+    assert FakeActual.instances[-1].committed is True
+
+
 def _gateway(tmp_path: Path) -> ActualBudgetGateway:
     return ActualBudgetGateway(
         ActualBudgetSettings(
             base_url="https://actual.example",
             password="secret",
-            budget="Household",
             data_dir=tmp_path / "actual-cache",
         ),
         actual_cls=FakeActual,

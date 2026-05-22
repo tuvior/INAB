@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi.testclient import TestClient
 
 from inab.config import Settings
+from inab.migration import MigrationWorkspace
 from inab.models import make_import_id
 from inab.store import Store
 from inab.web import _save_plan, create_app, format_money
@@ -35,6 +36,88 @@ def test_rules_page_requires_auth(
 
     assert response.status_code == 303
     assert response.headers["location"].startswith("/login")
+
+
+def test_migration_wizard_generates_ynab_export(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
+    client, _, gateway = app_client
+    login(client)
+    gateway.export_payload = {
+        "data": {
+            "budget": {
+                "accounts": [{"id": "account-1"}],
+                "payees": [{"id": "payee-1"}],
+                "transactions": [{"id": "tx-1"}],
+                "category_groups": [{"id": "group-1", "name": "Everyday"}],
+                "months": [
+                    {
+                        "month": "2026-05-01",
+                        "categories": [
+                            {
+                                "id": "cat-food",
+                                "category_group_id": "group-1",
+                                "name": "Food",
+                                "goal_type": "MF",
+                                "goal_target": 250000,
+                            }
+                        ],
+                    }
+                ],
+            }
+        }
+    }
+
+    start = client.post(
+        "/migration/ynab-to-actual",
+        data={"ack_templates": "1"},
+        follow_redirects=False,
+    )
+    source = client.post(
+        "/migration/ynab-to-actual/source",
+        data={"source_budget_id": "plan-1"},
+        follow_redirects=False,
+    )
+
+    assert start.status_code == 303
+    assert source.status_code == 303
+    analyze = client.get(source.headers["location"])
+    assert analyze.status_code == 200
+    assert "Download JSON" in analyze.text
+    assert "#template 250.00" in analyze.text
+    export_url = source.headers["location"].replace("/analyze", "/export")
+    download = client.get(export_url)
+    assert download.status_code == 200
+    assert download.json()["data"]["budget"]["accounts"][0]["id"] == "account-1"
+
+
+def test_migration_finish_exposes_explicit_write_actions(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
+    client, store, _ = app_client
+    login(client)
+    data_dir = store.database_path.parents[1]
+    workspace = MigrationWorkspace(data_dir)
+    migration_id = workspace.create(
+        source_budget_id="plan-1", source_budget_name="Household"
+    )
+    state = workspace.state(migration_id)
+    state.update(
+        {
+            "actual_budget_id": "actual-plan",
+            "actual_budget_name": "Imported",
+            "target_items": [],
+        }
+    )
+    workspace.save_state(migration_id, state)
+    workspace.save_export(migration_id, {"data": {"budget": {}}})
+
+    response = client.get(f"/migration/ynab-to-actual/{migration_id}/finish")
+
+    assert response.status_code == 200
+    assert "Patch Actual category notes" in response.text
+    assert "Copy INAB-local state" in response.text
+    assert "Switch INAB to Actual" in response.text
 
 
 def test_import_history_requires_auth(

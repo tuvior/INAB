@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Migration Summary - INAB{% endblock %}
+{% block content %}
+<section class="toolbar-section">
+  <div>
+    <h1>Migration summary</h1>
+    <p class="muted">{{ migration.source_budget_name }} to {{ migration.actual_budget_name or "Actual Budget" }}</p>
+  </div>
+  <div class="toolbar-actions">
+    <a class="button secondary" href="{{ url_path_for('migration_export_download', migration_id=migration.id) }}">YNAB JSON</a>
+    {% if migration.state_migration_report %}
+      <a class="button secondary" href="{{ url_path_for('migration_report_download', migration_id=migration.id, format='json') }}">Report JSON</a>
+      <a class="button secondary" href="{{ url_path_for('migration_report_download', migration_id=migration.id, format='md') }}">Report MD</a>
+    {% endif %}
+  </div>
+</section>
+
+<section class="status-grid">
+  <div class="panel">
+    <h2>Targets</h2>
+    <p class="metric">{{ migration.target_items|length }}</p>
+    <p class="muted">reviewed proposals</p>
+  </div>
+  <div class="panel">
+    <h2>Note patches</h2>
+    <p class="metric">{{ migration.note_patch_report|default([], true)|length }}</p>
+    <p class="muted">Actual category notes attempted</p>
+  </div>
+  <div class="panel">
+    <h2>Local state</h2>
+    <p class="status {% if migration.state_migration_report %}ok{% else %}bad{% endif %}">{% if migration.state_migration_report %}Copied{% else %}Not copied{% endif %}</p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <h2>Explicit write actions</h2>
+      <p class="muted">Run these after reviewing matches. Re-running note patching skips categories that already contain the migration marker.</p>
+    </div>
+  </div>
+  <div class="toolbar-actions wrap-actions">
+    <form method="post" action="{{ url_path_for('migration_patch_notes', migration_id=migration.id) }}">
+      <button type="submit">Patch Actual category notes</button>
+    </form>
+    <form method="post" action="{{ url_path_for('migration_rollback_notes', migration_id=migration.id) }}">
+      <button class="secondary danger" type="submit">Rollback note patches</button>
+    </form>
+    <form method="post" action="{{ url_path_for('migration_migrate_state', migration_id=migration.id) }}">
+      <button type="submit">Copy INAB-local state</button>
+    </form>
+    <form method="post" action="{{ url_path_for('migration_switch_to_actual', migration_id=migration.id) }}">
+      <button class="secondary" type="submit">Switch INAB to Actual</button>
+    </form>
+  </div>
+</section>
+
+{% if migration.note_patch_report %}
+<section class="panel">
+  <h2>Note patch report</h2>
+  <div class="table-wrap mobile-card-wrap">
+    <table class="mobile-card-table">
+      <thead><tr><th>Category</th><th>Status</th><th>Error</th></tr></thead>
+      <tbody>
+        {% for row in migration.note_patch_report %}
+          <tr>
+            <td>{{ row.category_name or row.category_id }}</td>
+            <td>{% if row.patched %}patched{% else %}skipped{% endif %}</td>
+            <td>{{ row.error or "" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if migration.state_migration_report %}
+<section class="panel">
+  <h2>Local state report</h2>
+  <pre class="report-block">{{ migration.state_migration_report|tojson(indent=2) }}</pre>
+</section>
+{% endif %}
+{% endblock %}

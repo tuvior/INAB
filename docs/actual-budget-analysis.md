@@ -10,10 +10,9 @@ Assumption: INAB would talk to a hosted/self-hosted Actual Budget server. That i
 
 Supporting Actual Budget is feasible, but it is not a drop-in replacement for the current YNAB client. The existing INAB workflow maps well to Actual Budget: parse bank exports locally, preview rows, apply local rules, map bank accounts to budget accounts, skip duplicates, import transactions, represent transfers, and undo an import. The main work is to introduce a backend-neutral budget gateway and move YNAB-specific naming out of storage, templates, and transaction payload generation.
 
-The cleanest operating model is:
+The current operating model is:
 
-- `INAB_BACKEND=ynab` or `INAB_BACKEND=actual` at startup.
-- Exactly one backend is active per app process.
+- The active backend is selected in the Setup UI and persisted in `INAB_DATA_DIR/app.sqlite3`.
 - Each backend gets separate local state by default, so YNAB and Actual rules, mappings, selected budget, import history, and undo IDs do not mix.
 - Existing YNAB behavior remains the reference implementation.
 
@@ -110,19 +109,14 @@ Expected parity is high for the user-facing workflow:
 
 The main caveat is "the whole functionality" should mean the same INAB workflow, not identical YNAB result metadata. Some YNAB-specific diagnostics, such as matched transaction counts returned by YNAB's API response, should become backend-specific optional details.
 
-## Proposed Configuration
+## Configuration
 
-Use a startup-only backend switch:
-
-```sh
-INAB_BACKEND="ynab"  # or "actual"
-```
+Use the Setup UI to choose YNAB or Actual Budget. Backend-specific local state is stored under `INAB_DATA_DIR/<backend>/`.
 
 YNAB settings stay separate:
 
 ```sh
 YNAB_ACCESS_TOKEN="..."
-YNAB_BUDGET_ID=""  # optional future env override for selected budget
 ```
 
 Actual settings should be separate:
@@ -130,7 +124,6 @@ Actual settings should be separate:
 ```sh
 ACTUAL_BASE_URL="http://localhost:5006"
 ACTUAL_PASSWORD="..."
-ACTUAL_BUDGET="Household"
 ACTUAL_ENCRYPTION_PASSWORD=""   # only for encrypted budget files
 ACTUAL_DATA_DIR="./data/actual-cache"
 ACTUAL_VERIFY_SSL="true"
@@ -138,17 +131,16 @@ ACTUAL_VERIFY_SSL="true"
 
 `ACTUAL_BASE_URL` points to the hosted AB server. `ACTUAL_DATA_DIR` is not INAB's rules/mappings database; it is the local actualpy cache of the remote Actual budget file.
 
-Shared INAB settings remain shared:
+Shared INAB settings:
 
 ```sh
 INAB_USERNAME="inab"
 INAB_PASSWORD="choose-a-password"
 INAB_SESSION_SECRET="stable-cookie-signing-secret"
-INAB_MAX_UPLOAD_BYTES="10485760"
-INAB_TARGET_CURRENCY="CHF"
-INAB_SELF_NAMES="Alex Example,Example Alex"
 INAB_ROOT_PATH="/inab"
 ```
+
+INAB accepts uploads up to 50 MiB and imports CHF statements. Own-name aliases are edited in Setup and stored with the active backend state.
 
 For backend-local state, prefer separate SQLite databases:
 
@@ -484,8 +476,8 @@ Recommended initial path: use `create_transfer`, then set `financial_id` on the 
 
 1. Create backend-neutral dataclasses and `BudgetGateway`.
 2. Move `OfficialYnabGateway` behind that protocol with no behavior change.
-3. Add `INAB_BACKEND` and backend-specific `Settings` fields.
-4. Change store path selection to `INAB_DATA_DIR/<backend>/inab.sqlite3` unless `INAB_DATABASE_PATH` is explicitly set.
+3. Add backend-specific `Settings` fields.
+4. Change store path selection to `INAB_DATA_DIR/<backend>/inab.sqlite3`.
 5. Rename UI labels and error messages to use `gateway.backend_label` instead of hard-coded YNAB where possible.
 6. Replace `BankTransaction.to_ynab_payload()` with backend-neutral import transaction construction.
 7. Add `ActualBudgetGateway` using actualpy.

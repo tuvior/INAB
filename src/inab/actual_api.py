@@ -27,7 +27,6 @@ class ActualBudgetError(BudgetError):
 class ActualBudgetSettings:
     base_url: str
     password: str
-    budget: str
     encryption_password: str | None = None
     data_dir: Path | None = None
     verify_ssl: bool | str = True
@@ -44,8 +43,6 @@ class ActualBudgetGateway:
             raise ActualBudgetError("ACTUAL_BASE_URL is not configured.")
         if not settings.password:
             raise ActualBudgetError("ACTUAL_PASSWORD is not configured.")
-        if not settings.budget:
-            raise ActualBudgetError("ACTUAL_BUDGET is not configured.")
         self.settings = settings
         self._actual_cls = actual_cls
 
@@ -217,6 +214,106 @@ class ActualBudgetGateway:
                 _safe_error("Could not delete Actual Budget transaction", exc)
             ) from exc
 
+    def append_category_note_blocks(
+        self, budget_id: str, patches: list[dict[str, str]], *, marker: str
+    ) -> list[dict[str, str | bool | None]]:
+        report: list[dict[str, str | bool | None]] = []
+        if not patches:
+            return report
+        try:
+            with self._actual(file=budget_id) as actual:
+                database = _database()
+                for patch in patches:
+                    category_id = patch["category_id"]
+                    block = patch["block"]
+                    category = actual.session.get(database.Categories, category_id)
+                    if category is None or _deleted(category):
+                        report.append(
+                            {
+                                "category_id": category_id,
+                                "category_name": patch.get("category_name"),
+                                "patched": False,
+                                "error": "Category not found.",
+                            }
+                        )
+                        continue
+                    existing = getattr(category, "notes", None) or ""
+                    if marker in existing:
+                        report.append(
+                            {
+                                "category_id": category_id,
+                                "category_name": patch.get("category_name"),
+                                "patched": False,
+                                "error": "Marker already exists.",
+                            }
+                        )
+                        continue
+                    category.notes = _append_note_block(existing, block)
+                    report.append(
+                        {
+                            "category_id": category_id,
+                            "category_name": patch.get("category_name"),
+                            "patched": True,
+                            "before": existing,
+                            "after": category.notes,
+                            "error": None,
+                        }
+                    )
+                actual.commit()
+        except Exception as exc:
+            raise ActualBudgetError(
+                _safe_error("Could not patch Actual Budget category notes", exc)
+            ) from exc
+        return report
+
+    def rollback_category_note_blocks(
+        self, budget_id: str, category_ids: list[str], *, marker: str
+    ) -> list[dict[str, str | bool | None]]:
+        report: list[dict[str, str | bool | None]] = []
+        if not category_ids:
+            return report
+        try:
+            with self._actual(file=budget_id) as actual:
+                database = _database()
+                for category_id in category_ids:
+                    category = actual.session.get(database.Categories, category_id)
+                    if category is None or _deleted(category):
+                        report.append(
+                            {
+                                "category_id": category_id,
+                                "rolled_back": False,
+                                "error": "Category not found.",
+                            }
+                        )
+                        continue
+                    existing = getattr(category, "notes", None) or ""
+                    updated = _remove_marked_note_block(existing, marker)
+                    if updated == existing:
+                        report.append(
+                            {
+                                "category_id": category_id,
+                                "rolled_back": False,
+                                "error": "Marker not found.",
+                            }
+                        )
+                        continue
+                    category.notes = updated
+                    report.append(
+                        {
+                            "category_id": category_id,
+                            "rolled_back": True,
+                            "before": existing,
+                            "after": updated,
+                            "error": None,
+                        }
+                    )
+                actual.commit()
+        except Exception as exc:
+            raise ActualBudgetError(
+                _safe_error("Could not roll back Actual Budget category notes", exc)
+            ) from exc
+        return report
+
     @contextmanager
     def _actual(self, *, file: str | None) -> Iterator[Any]:
         actual_cls = self._actual_cls or _actual_cls()
@@ -342,6 +439,25 @@ def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _append_note_block(existing: str, block: str) -> str:
+    existing = existing.rstrip()
+    block = block.strip()
+    if not existing:
+        return block
+    return f"{existing}\n\n{block}"
+
+
+def _remove_marked_note_block(existing: str, marker: str) -> str:
+    start_marker = f"<!-- {marker} start -->"
+    end_marker = f"<!-- {marker} end -->"
+    start = existing.find(start_marker)
+    end = existing.find(end_marker)
+    if start < 0 or end < start:
+        return existing
+    end += len(end_marker)
+    return (existing[:start].rstrip() + "\n\n" + existing[end:].lstrip()).strip()
 
 
 def _safe_error(message: str, exc: Exception) -> str:

@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from inab.web import create_app
 from inab.config import Settings
-from inab.store import Store
 
 
 def test_database_path_is_backend_scoped_by_default(tmp_path: Path) -> None:
@@ -15,34 +13,13 @@ def test_database_path_is_backend_scoped_by_default(tmp_path: Path) -> None:
     assert actual.database_path == tmp_path / "actual" / "inab.sqlite3"
 
 
-def test_database_path_override_is_explicit(tmp_path: Path) -> None:
-    settings = Settings(
-        data_dir=tmp_path,
-        backend="actual",
-        database_path_override=tmp_path / "custom.sqlite3",
-    )
-
-    assert settings.database_path == tmp_path / "custom.sqlite3"
-
-
-def test_actual_budget_env_seed_is_backend_local(tmp_path: Path) -> None:
+def test_actual_configuration_does_not_require_budget_env(tmp_path: Path) -> None:
     settings = Settings(
         data_dir=tmp_path,
         backend="actual",
         actual_base_url="https://actual.example",
         actual_password="secret",
-        actual_budget="Household",
-    )
-    store = Store(settings.database_path)
-
-    create_app(
-        settings=settings, store=store, gateway_factory=lambda _settings: _NoopGateway()
     )
 
-    assert store.selected_plan() == ("Household", "Household")
+    assert settings.actual_configured is True
     assert settings.database_path == tmp_path / "actual" / "inab.sqlite3"
-
-
-class _NoopGateway:
-    backend_name = "noop"
-    backend_label = "Noop"

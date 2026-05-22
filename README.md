@@ -39,14 +39,13 @@ INAB parses CAMT.053 XML and supported CSV exports locally, lets you review them
 uv sync --extra dev
 
 export YNAB_ACCESS_TOKEN="..."
-export INAB_BACKEND="ynab"
 export INAB_USERNAME="inab"
 export INAB_PASSWORD="choose-a-password"
 
 uv run uvicorn inab.web:create_app --factory --reload
 ```
 
-Open <http://127.0.0.1:8000> and sign in. Choose your budget in Setup, then upload a CAMT.053 XML file once so INAB can discover IBANs. Map each discovered IBAN to a budget account, upload again, review the preview, and import.
+Open <http://127.0.0.1:8000> and sign in. Choose YNAB or Actual Budget in Setup, choose your budget, then upload a CAMT.053 XML file once so INAB can discover IBANs. Map each discovered IBAN to a budget account, upload again, review the preview, and import.
 
 For CSV uploads, choose the target budget account on the upload form. The supported CSV format does not include an account identifier.
 
@@ -80,7 +79,6 @@ Backend-specific local state is stored separately by default: `INAB_DATA_DIR/yna
 ```sh
 docker build -t inab .
 docker run --rm -p 8000:8000 \
-  -e INAB_BACKEND="ynab" \
   -e YNAB_ACCESS_TOKEN="$YNAB_ACCESS_TOKEN" \
   -e INAB_USERNAME="inab" \
   -e INAB_PASSWORD="choose-a-password" \
@@ -92,11 +90,7 @@ If you expose INAB outside localhost, put it behind HTTPS. Keep `/data` on persi
 
 ## Configuration
 
-Backend selection:
-
-```sh
-INAB_BACKEND="ynab"  # or "actual"
-```
+Backend selection is available in the Setup UI. The selected backend is persisted locally in `INAB_DATA_DIR/app.sqlite3` and can be changed without restarting the process.
 
 Required for YNAB:
 
@@ -109,7 +103,6 @@ Required for Actual Budget:
 ```sh
 ACTUAL_BASE_URL="https://actual.example"
 ACTUAL_PASSWORD="..."
-ACTUAL_BUDGET="Household"
 ```
 
 Actual optional settings:
@@ -131,15 +124,13 @@ Optional:
 
 ```sh
 INAB_DATA_DIR="./data"
-INAB_DATABASE_PATH="./data/custom-inab.sqlite3"
 INAB_SESSION_SECRET="stable-cookie-signing-secret"
-INAB_MAX_UPLOAD_BYTES="10485760"
-INAB_TARGET_CURRENCY="CHF"
-INAB_SELF_NAMES="Alex Example,Example Alex"
 INAB_ROOT_PATH="/inab"
 ```
 
 Set `INAB_ROOT_PATH` only when publishing the app under a URL prefix such as `https://example.test/inab`.
+
+INAB currently accepts uploads up to 50 MiB and imports CHF statements. Own-name aliases are edited in Setup and stored in the backend-local SQLite database.
 
 ## Import Rules
 
@@ -148,6 +139,25 @@ INAB can rewrite payees and assign backend categories before import. Rules are e
 ## Actual Budget Analysis
 
 See [docs/actual-budget-analysis.md](docs/actual-budget-analysis.md) for the design reference for Actual Budget support through `actualpy`.
+
+## YNAB To Actual Migration
+
+INAB includes a guided migration wizard at **Migrate → YNAB to Actual migration** (`/migration/ynab-to-actual`).
+
+The wizard does not silently migrate data. It helps you:
+
+- export a full YNAB JSON budget for Actual's native nYNAB importer;
+- review proposed Actual Budget template lines derived from YNAB targets;
+- import the JSON in Actual using Actual's built-in nYNAB importer;
+- select the imported Actual budget and match categories/accounts;
+- explicitly patch Actual category notes with INAB-marked template blocks;
+- explicitly copy selected INAB-local state from the YNAB state database to the Actual state database.
+
+The local-state migration can copy account mappings, import rules with matched categories, counterparty labels, own-name aliases, and observed account suggestions. It does not copy import history, undo IDs, or previously created backend transaction IDs as active Actual state.
+
+Actual Budget templates are experimental. Category-note patching appends an INAB-marked block and includes a rollback action for that block where possible.
+
+For real-server verification against a disposable Actual budget, see [docs/actual-integration-verification.md](docs/actual-integration-verification.md).
 
 ## Import Behavior
 

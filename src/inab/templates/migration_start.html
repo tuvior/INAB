@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Migrate YNAB to Actual - INAB{% endblock %}
+{% block content %}
+<section class="toolbar-section">
+  <div>
+    <h1>YNAB to Actual migration</h1>
+    <p class="muted">Export YNAB, import with Actual's native nYNAB importer, then explicitly patch templates and INAB-local state.</p>
+  </div>
+</section>
+
+{% if error %}
+  <div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<section class="status-grid">
+  <div class="panel">
+    <h2>YNAB token</h2>
+    <p class="status {% if ynab_ready %}ok{% else %}bad{% endif %}">{% if ynab_ready %}Configured{% else %}Missing{% endif %}</p>
+  </div>
+  <div class="panel">
+    <h2>Actual server</h2>
+    <p class="status {% if actual_ready %}ok{% else %}bad{% endif %}">{% if actual_ready %}Configured{% else %}Missing{% endif %}</p>
+    {% if actual_base_url %}<p>{{ actual_base_url }}</p>{% endif %}
+  </div>
+  <div class="panel">
+    <h2>Writes</h2>
+    <p class="muted">Every Actual note patch and local-state migration requires an explicit action.</p>
+  </div>
+</section>
+
+<section class="panel form-stack migration-process-card">
+  <h2>Process</h2>
+  <div class="migration-step-grid">
+    <div class="migration-step"><strong>1</strong><span>Choose the source YNAB budget and generate a JSON export.</span></div>
+    <div class="migration-step"><strong>2</strong><span>Import that JSON in Actual using the nYNAB importer.</span></div>
+    <div class="migration-step"><strong>3</strong><span>Review proposed Actual template lines and category/account matches.</span></div>
+    <div class="migration-step"><strong>4</strong><span>Patch Actual notes and copy INAB-local state after confirmation.</span></div>
+  </div>
+  <form class="migration-ack-form" method="post" action="{{ url_path_for('migration_start') }}">
+    <label class="checkbox-row">
+      <input type="checkbox" name="ack_templates" value="1" required>
+      <span>I understand Actual Budget templates are experimental, and INAB will only patch category notes after I explicitly apply the patch.</span>
+    </label>
+    <button type="submit">Start migration</button>
+  </form>
+</section>
+{% endblock %}

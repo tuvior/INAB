@@ -193,12 +193,26 @@ class FakeGateway:
         self.returned_transactions: list[dict[str, Any]] = []
         self.deleted: list[tuple[str, str]] = []
         self.delete_errors: dict[str, str] = {}
+        self.export_payload: dict[str, Any] = {
+            "data": {
+                "budget": {
+                    "accounts": [],
+                    "payees": [],
+                    "transactions": [],
+                    "category_groups": [],
+                    "months": [],
+                }
+            }
+        }
 
     def list_budgets(self) -> list[BudgetRef]:
         return self.plans
 
     def list_plans(self) -> list[BudgetRef]:
         return self.list_budgets()
+
+    def export_budget_json(self, budget_id: str) -> dict[str, Any]:
+        return self.export_payload
 
     def list_accounts(self, plan_id: str) -> list[BudgetAccount]:
         return self.accounts

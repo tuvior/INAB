@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Match Migration State - INAB{% endblock %}
+{% block content %}
+<section class="toolbar-section">
+  <div>
+    <h1>Match categories and accounts</h1>
+    <p class="muted">Exact name matches are preselected. Leave unmatched rows blank to skip them.</p>
+  </div>
+</section>
+
+<form method="post" action="{{ url_path_for('migration_match', migration_id=migration.id) }}">
+  <section class="setup-section">
+    <div class="setup-section-header">
+      <h2>Categories</h2>
+      <p class="muted">Used for template note patches and categorized import rules.</p>
+    </div>
+    <div class="mapping-list">
+      {% for source_id, match in migration.category_matches.items() %}
+        {% set source = source_categories.get(source_id, {}) %}
+        <div class="mapping-row">
+          <div>
+            <strong>{{ source.category_group_name }}: {{ source.name }}</strong>
+            <span class="muted">{{ match.status }}</span>
+          </div>
+          <select name="category_{{ source_id }}">
+            <option value="">Skip</option>
+            {% for category in actual_categories %}
+              {% set label = category.group_name ~ ': ' ~ category.name if category.group_name else category.name %}
+              <option value="{{ category.id }}" {% if category.id == match.actual_category_id %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="setup-section">
+    <div class="setup-section-header">
+      <h2>Account mappings</h2>
+      <p class="muted">Used when copying INAB bank-account mappings.</p>
+    </div>
+    <div class="mapping-list">
+      {% for mapping in ynab_mappings %}
+        {% set match = migration.account_matches.get(mapping.iban, {}) %}
+        <div class="mapping-row">
+          <div>
+            <strong>{{ mapping.iban }}</strong>
+            <span class="muted">{{ mapping.account_name }} · {{ match.status }}</span>
+          </div>
+          <select name="account_{{ mapping.iban }}">
+            <option value="">Skip</option>
+            {% for account in actual_accounts %}
+              <option value="{{ account.id }}" {% if account.id == match.actual_account_id %}selected{% endif %}>{{ account.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      {% else %}
+        <div class="panel"><p class="muted">No YNAB account mappings exist yet.</p></div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <div class="sticky-actions">
+    <button type="submit">Save matches</button>
+  </div>
+</form>
+{% endblock %}

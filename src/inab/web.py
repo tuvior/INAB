@@ -6,18 +6,20 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal, InvalidOperation
+import json
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import uvicorn
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .actual_api import ActualBudgetGateway, ActualBudgetSettings
+from .backend import ActiveSettings, ActiveStore, BackendManager
 from .budget_api import (
     BudgetAccount,
     BudgetCategory,
@@ -27,8 +29,21 @@ from .budget_api import (
     ImportTransaction,
 )
 from .camt import CamtError, parse_upload
-from .config import Settings
+from .config import MAX_UPLOAD_BYTES, TARGET_CURRENCY, Settings
 from .models import BankTransaction, ParseResult, normalize_whitespace, truncate
+from .migration import (
+    MigrationWorkspace,
+    analyze_targets,
+    build_note_patches,
+    default_decisions,
+    export_counts,
+    marker_for,
+    markdown_report,
+    match_accounts,
+    match_categories,
+    migrate_local_state,
+    source_category_map,
+)
 from .rules import RuleError, apply_rules, evaluate_transaction, validate_rule_input
 from .store import AccountMapping, Store
 from .transfers import detect_transfer_pairs
@@ -54,22 +69,21 @@ def create_app(
     store: Store | None = None,
     gateway_factory: GatewayFactory | None = None,
 ) -> FastAPI:
-    settings = settings or Settings.from_env()
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    store = store or Store(settings.database_path)
-    if (
-        settings.backend == "actual"
-        and settings.actual_budget
-        and not store.selected_plan()[0]
-    ):
-        store.save_selected_plan(settings.actual_budget, settings.actual_budget)
+    base_settings = settings or Settings.from_env()
+    base_settings.data_dir.mkdir(parents=True, exist_ok=True)
     gateway_factory = gateway_factory or _default_gateway_factory
+    backend_manager = BackendManager(
+        base_settings, store_override=store, gateway_factory=gateway_factory
+    )
+    settings = ActiveSettings(backend_manager)
+    store = ActiveStore(backend_manager)
 
     app = FastAPI(
-        title="INAB", docs_url=None, redoc_url=None, root_path=settings.root_path
+        title="INAB", docs_url=None, redoc_url=None, root_path=base_settings.root_path
     )
     app.state.settings = settings
     app.state.store = store
+    app.state.backend_manager = backend_manager
     app.state.gateway_factory = gateway_factory
     app.add_middleware(
         SessionMiddleware, secret_key=settings.session_secret, same_site="lax"
@@ -163,6 +177,9 @@ def create_app(
             form = await request.form()
             action = str(form.get("action") or "")
             try:
+                if action == "backend":
+                    backend_manager.switch_backend(str(form.get("backend") or ""))
+                    return _redirect(request, "/setup")
                 if action == "plan":
                     _save_plan(
                         store, gateway_factory(settings), str(form.get("plan_id") or "")
@@ -207,7 +224,7 @@ def create_app(
             except HTTPException as exc:
                 post_error = str(exc.detail)
 
-        self_names = _effective_self_names(store, settings)
+        self_names = _effective_self_names(store)
         mappings = store.list_mappings()
         counterparty_mappings = store.list_counterparty_mappings()
         mapped_ibans = {mapping.iban for mapping in mappings}
@@ -261,8 +278,8 @@ def create_app(
         csv_ynab_account_id: str = Form(""),
     ) -> Any:
         filename = file.filename or "upload"
-        content = await file.read(settings.max_upload_bytes + 1)
-        if len(content) > settings.max_upload_bytes:
+        content = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(content) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail="Upload is too large.")
         csv_mapping, csv_error = _csv_mapping_for_upload(
             filename=filename,
@@ -295,7 +312,7 @@ def create_app(
             parsed = parse_upload(
                 filename,
                 content,
-                target_currency=settings.target_currency,
+                target_currency=TARGET_CURRENCY,
                 csv_account_key=csv_mapping.iban if csv_mapping else None,
             )
         except CamtError as exc:
@@ -329,7 +346,7 @@ def create_app(
                 bank_name=statement.bank_name,
             )
         _observe_counterparty_accounts(store, parsed)
-        _apply_counterparty_account_labels(parsed, store=store, settings=settings)
+        _apply_counterparty_account_labels(parsed, store=store)
         apply_rules(parsed.transactions, store.list_rules(enabled_only=True))
 
         plan_id, plan_name = store.selected_plan()
@@ -512,6 +529,424 @@ def create_app(
         store.update_job(job_id, status=status, result=result)
         return _redirect(request, f"/imports/{job_id}")
 
+    @app.get(
+        "/migration/ynab-to-actual",
+        response_class=HTMLResponse,
+        dependencies=[Depends(_require_auth)],
+        name="migration_start",
+    )
+    async def migration_start(request: Request) -> Any:
+        return _render(
+            request,
+            "migration_start.html",
+            {
+                "ynab_ready": base_settings.ynab_configured,
+                "actual_ready": base_settings.actual_configured,
+                "actual_base_url": base_settings.actual_base_url,
+            },
+        )
+
+    @app.post(
+        "/migration/ynab-to-actual",
+        response_class=HTMLResponse,
+        dependencies=[Depends(_require_auth)],
+    )
+    async def migration_start_post(request: Request) -> Any:
+        form = await request.form()
+        if not form.get("ack_templates"):
+            return _render(
+                request,
+                "migration_start.html",
+                {
+                    "ynab_ready": base_settings.ynab_configured,
+                    "actual_ready": base_settings.actual_configured,
+                    "actual_base_url": base_settings.actual_base_url,
+                    "error": "Acknowledge Actual Budget's experimental template support before continuing.",
+                },
+                status_code=400,
+            )
+        return _redirect(request, "/migration/ynab-to-actual/source")
+
+    @app.get(
+        "/migration/ynab-to-actual/source",
+        response_class=HTMLResponse,
+        dependencies=[Depends(_require_auth)],
+        name="migration_source",
+    )
+    async def migration_source(request: Request) -> Any:
+        plans = []
+        error = None
+        if base_settings.ynab_configured:
+            try:
+                plans = backend_manager.gateway("ynab").list_budgets()
+            except BudgetError as exc:
+                error = str(exc)
+        else:
+            error = "YNAB_ACCESS_TOKEN is not configured."
+        return _render(
+            request,
+            "migration_source.html",
+            {"plans": plans, "error": error},
+        )
+
+    @app.post(
+        "/migration/ynab-to-actual/source",
+        dependencies=[Depends(_require_auth)],
+    )
+    async def migration_source_post(request: Request) -> Any:
+        form = await request.form()
+        source_budget_id = str(form.get("source_budget_id") or "")
+        if not source_budget_id:
+            raise HTTPException(status_code=400, detail="Select a YNAB budget.")
+        gateway = backend_manager.gateway("ynab")
+        plans = gateway.list_budgets()
+        selected = next(
+            (plan for plan in plans if str(plan.id) == source_budget_id), None
+        )
+        if selected is None:
+            raise HTTPException(
+                status_code=400, detail="Selected YNAB budget was not found."
+            )
+        if not hasattr(gateway, "export_budget_json"):
+            raise HTTPException(status_code=500, detail="YNAB export is not available.")
+        export = gateway.export_budget_json(source_budget_id)
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        migration_id = workspace.create(
+            source_budget_id=source_budget_id, source_budget_name=selected.name
+        )
+        workspace.save_export(migration_id, export)
+        items = analyze_targets(export)
+        state = workspace.state(migration_id)
+        state.update(
+            {
+                "step": "exported",
+                "export_counts": export_counts(export),
+                "target_items": items,
+                "decisions": default_decisions(items),
+            }
+        )
+        workspace.save_state(migration_id, state)
+        return _redirect(request, f"/migration/ynab-to-actual/{migration_id}/analyze")
+
+    @app.get(
+        "/migration/ynab-to-actual/{migration_id}/export",
+        dependencies=[Depends(_require_auth)],
+        name="migration_export_download",
+    )
+    async def migration_export_download(migration_id: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        state = workspace.state(migration_id)
+        filename = _download_filename(
+            "ynab-export", state.get("source_budget_name") or "budget", "json"
+        )
+        return FileResponse(
+            workspace.export_path(migration_id),
+            media_type="application/json",
+            filename=filename,
+        )
+
+    @app.get(
+        "/migration/ynab-to-actual/{migration_id}/analyze",
+        response_class=HTMLResponse,
+        dependencies=[Depends(_require_auth)],
+        name="migration_analyze",
+    )
+    async def migration_analyze(request: Request, migration_id: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        state = workspace.state(migration_id)
+        return _render(request, "migration_analyze.html", {"migration": state})
+
+    @app.post(
+        "/migration/ynab-to-actual/{migration_id}/analyze",
+        dependencies=[Depends(_require_auth)],
+    )
+    async def migration_analyze_post(request: Request, migration_id: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        state = workspace.state(migration_id)
+        form = await request.form()
+        decisions = {}
+        for item in state.get("target_items") or []:
+            category_id = str(item["category_id"])
+            action = str(form.get(f"action_{category_id}") or "skip")
+            if action not in {"active", "comment", "skip"}:
+                action = "skip"
+            decisions[category_id] = {
+                "action": action,
+                "line": str(form.get(f"line_{category_id}") or "").strip(),
+            }
+        state["decisions"] = decisions
+        state["step"] = "targets_reviewed"
+        workspace.save_state(migration_id, state)
+        return _redirect(request, f"/migration/ynab-to-actual/{migration_id}/actual")
+
+    @app.get(
+        "/migration/ynab-to-actual/{migration_id}/actual",
+        response_class=HTMLResponse,
+        dependencies=[Depends(_require_auth)],
+        name="migration_actual",
+    )
+    async def migration_actual(request: Request, migration_id: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        state = workspace.state(migration_id)
+        budgets = []
+        error = None
+        if base_settings.actual_configured:
+            try:
+                budgets = backend_manager.gateway("actual").list_budgets()
+            except BudgetError as exc:
+                error = str(exc)
+        else:
+            error = "Actual Budget env configuration is incomplete."
+        return _render(
+            request,
+            "migration_actual.html",
+            {
+                "migration": state,
+                "budgets": budgets,
+                "error": error,
+                "actual_base_url": base_settings.actual_base_url,
+            },
+        )
+
+    @app.post(
+        "/migration/ynab-to-actual/{migration_id}/actual",
+        dependencies=[Depends(_require_auth)],
+    )
+    async def migration_actual_post(request: Request, migration_id: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        state = workspace.state(migration_id)
+        form = await request.form()
+        actual_budget_id = str(form.get("actual_budget_id") or "")
+        if not actual_budget_id:
+            raise HTTPException(
+                status_code=400, detail="Select the imported Actual budget."
+            )
+        budgets = backend_manager.gateway("actual").list_budgets()
+        selected = next(
+            (budget for budget in budgets if str(budget.id) == actual_budget_id), None
+        )
+        if selected is None:
+            raise HTTPException(
+                status_code=400, detail="Selected Actual budget was not found."
+            )
+        state["actual_budget_id"] = str(selected.id)
+        state["actual_budget_name"] = selected.name
+        state["step"] = "actual_selected"
+        workspace.save_state(migration_id, state)
+        return _redirect(request, f"/migration/ynab-to-actual/{migration_id}/match")
+
+    @app.get(
+        "/migration/ynab-to-actual/{migration_id}/match",
+        response_class=HTMLResponse,
+        dependencies=[Depends(_require_auth)],
+        name="migration_match",
+    )
+    async def migration_match(request: Request, migration_id: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        state = workspace.state(migration_id)
+        actual_budget_id = state.get("actual_budget_id")
+        if not actual_budget_id:
+            return _redirect(
+                request, f"/migration/ynab-to-actual/{migration_id}/actual"
+            )
+        gateway = backend_manager.gateway("actual")
+        actual_categories = _visible_categories(
+            gateway.list_categories(actual_budget_id)
+        )
+        actual_accounts = _active_accounts(gateway.list_accounts(actual_budget_id))
+        export = workspace.export(migration_id)
+        if not state.get("category_matches"):
+            state["category_matches"] = match_categories(export, actual_categories)
+        if not state.get("account_matches"):
+            state["account_matches"] = match_accounts(
+                backend_manager.store("ynab"), actual_accounts
+            )
+        workspace.save_state(migration_id, state)
+        return _render(
+            request,
+            "migration_match.html",
+            {
+                "migration": state,
+                "actual_categories": actual_categories,
+                "actual_accounts": actual_accounts,
+                "source_categories": source_category_map(export),
+                "ynab_mappings": backend_manager.store("ynab").list_mappings(),
+            },
+        )
+
+    @app.post(
+        "/migration/ynab-to-actual/{migration_id}/match",
+        dependencies=[Depends(_require_auth)],
+    )
+    async def migration_match_post(request: Request, migration_id: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        state = workspace.state(migration_id)
+        actual_budget_id = state.get("actual_budget_id")
+        if not actual_budget_id:
+            raise HTTPException(
+                status_code=400, detail="Select an Actual budget first."
+            )
+        form = await request.form()
+        gateway = backend_manager.gateway("actual")
+        actual_categories = _visible_categories(
+            gateway.list_categories(actual_budget_id)
+        )
+        categories_by_id = {category.id: category for category in actual_categories}
+        actual_accounts = _active_accounts(gateway.list_accounts(actual_budget_id))
+        accounts_by_id = {account.id: account for account in actual_accounts}
+        category_matches = {}
+        for source_id in (state.get("category_matches") or {}).keys():
+            actual_id = str(form.get(f"category_{source_id}") or "")
+            category = categories_by_id.get(actual_id)
+            category_matches[source_id] = {
+                "actual_category_id": category.id if category else "",
+                "actual_category_name": _category_label(category) if category else "",
+                "status": "manual" if category else "skipped",
+            }
+        account_matches = {}
+        for mapping in backend_manager.store("ynab").list_mappings():
+            actual_id = str(form.get(f"account_{mapping.iban}") or "")
+            account = accounts_by_id.get(actual_id)
+            account_matches[mapping.iban] = {
+                "actual_account_id": account.id if account else "",
+                "actual_account_name": account.name if account else "",
+                "transfer_payee_id": (
+                    account.transfer_payee_id
+                    if account and account.transfer_payee_id
+                    else ""
+                ),
+                "status": "manual" if account else "skipped",
+            }
+        state["category_matches"] = category_matches
+        state["account_matches"] = account_matches
+        state["step"] = "matched"
+        workspace.save_state(migration_id, state)
+        return _redirect(request, f"/migration/ynab-to-actual/{migration_id}/finish")
+
+    @app.post(
+        "/migration/ynab-to-actual/{migration_id}/patch-notes",
+        dependencies=[Depends(_require_auth)],
+    )
+    async def migration_patch_notes(request: Request, migration_id: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        state = workspace.state(migration_id)
+        actual_budget_id = state.get("actual_budget_id")
+        if not actual_budget_id:
+            raise HTTPException(
+                status_code=400, detail="Select an Actual budget first."
+            )
+        patches = build_note_patches(
+            migration_id=migration_id,
+            target_items=state.get("target_items") or [],
+            decisions=state.get("decisions") or {},
+            category_matches=state.get("category_matches") or {},
+        )
+        gateway = backend_manager.gateway("actual")
+        if not hasattr(gateway, "append_category_note_blocks"):
+            raise HTTPException(
+                status_code=500, detail="Actual note patching is not available."
+            )
+        report = gateway.append_category_note_blocks(
+            actual_budget_id, patches, marker=marker_for(migration_id)
+        )
+        state["note_patch_report"] = report
+        state["step"] = "notes_patched"
+        workspace.save_state(migration_id, state)
+        return _redirect(request, f"/migration/ynab-to-actual/{migration_id}/finish")
+
+    @app.post(
+        "/migration/ynab-to-actual/{migration_id}/rollback-notes",
+        dependencies=[Depends(_require_auth)],
+    )
+    async def migration_rollback_notes(request: Request, migration_id: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        state = workspace.state(migration_id)
+        actual_budget_id = state.get("actual_budget_id")
+        if not actual_budget_id:
+            raise HTTPException(
+                status_code=400, detail="Select an Actual budget first."
+            )
+        category_ids = [
+            str(item.get("category_id"))
+            for item in state.get("note_patch_report") or []
+            if item.get("category_id") and item.get("patched")
+        ]
+        gateway = backend_manager.gateway("actual")
+        if not hasattr(gateway, "rollback_category_note_blocks"):
+            raise HTTPException(
+                status_code=500, detail="Actual note rollback is not available."
+            )
+        state["note_rollback_report"] = gateway.rollback_category_note_blocks(
+            actual_budget_id, category_ids, marker=marker_for(migration_id)
+        )
+        workspace.save_state(migration_id, state)
+        return _redirect(request, f"/migration/ynab-to-actual/{migration_id}/finish")
+
+    @app.post(
+        "/migration/ynab-to-actual/{migration_id}/migrate-state",
+        dependencies=[Depends(_require_auth)],
+    )
+    async def migration_migrate_state(request: Request, migration_id: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        state = workspace.state(migration_id)
+        report = migrate_local_state(
+            ynab_store=backend_manager.store("ynab"),
+            actual_store=backend_manager.store("actual"),
+            account_matches=state.get("account_matches") or {},
+            category_matches=state.get("category_matches") or {},
+            source_categories=source_category_map(workspace.export(migration_id)),
+        )
+        state["state_migration_report"] = report
+        state["step"] = "state_migrated"
+        workspace.report_path(migration_id, "migration-report.json").write_text(
+            json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        workspace.report_path(migration_id, "migration-report.md").write_text(
+            markdown_report(report), encoding="utf-8"
+        )
+        workspace.save_state(migration_id, state)
+        return _redirect(request, f"/migration/ynab-to-actual/{migration_id}/finish")
+
+    @app.get(
+        "/migration/ynab-to-actual/{migration_id}/report/{format}",
+        dependencies=[Depends(_require_auth)],
+        name="migration_report_download",
+    )
+    async def migration_report_download(migration_id: str, format: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        if format == "json":
+            return FileResponse(
+                workspace.report_path(migration_id, "migration-report.json"),
+                media_type="application/json",
+                filename="inab-migration-report.json",
+            )
+        if format == "md":
+            return FileResponse(
+                workspace.report_path(migration_id, "migration-report.md"),
+                media_type="text/markdown",
+                filename="inab-migration-report.md",
+            )
+        raise HTTPException(status_code=404, detail="Report format not found.")
+
+    @app.post(
+        "/migration/ynab-to-actual/{migration_id}/switch-to-actual",
+        dependencies=[Depends(_require_auth)],
+    )
+    async def migration_switch_to_actual(request: Request, migration_id: str) -> Any:
+        backend_manager.switch_backend("actual")
+        return _redirect(request, "/setup")
+
+    @app.get(
+        "/migration/ynab-to-actual/{migration_id}/finish",
+        response_class=HTMLResponse,
+        dependencies=[Depends(_require_auth)],
+        name="migration_finish",
+    )
+    async def migration_finish(request: Request, migration_id: str) -> Any:
+        workspace = MigrationWorkspace(base_settings.data_dir)
+        state = workspace.state(migration_id)
+        return _render(request, "migration_finish.html", {"migration": state})
+
     return app
 
 
@@ -547,13 +982,12 @@ def _default_gateway_factory(settings: Settings) -> BudgetGateway:
             ActualBudgetSettings(
                 base_url=settings.actual_base_url or "",
                 password=settings.actual_password or "",
-                budget=settings.actual_budget or "",
                 encryption_password=settings.actual_encryption_password,
                 data_dir=settings.actual_data_dir,
                 verify_ssl=settings.actual_verify_ssl,
             )
         )
-    raise BudgetError(f"Unsupported INAB_BACKEND {settings.backend!r}.")
+    raise BudgetError(f"Unsupported backend {settings.backend!r}.")
 
 
 def format_money(value: Any) -> str:
@@ -585,6 +1019,12 @@ def _render(
         "url_path_for": lambda name, **params: _url_path_for(request, name, **params),
         "backend_label": settings.backend_label,
         "backend_configured": settings.backend_configured,
+        "active_backend": getattr(
+            request.app.state.backend_manager, "active_backend", settings.backend
+        ),
+        "backend_options": getattr(
+            request.app.state.backend_manager, "backend_options", []
+        ),
         **context,
     }
     return templates.TemplateResponse(
@@ -625,6 +1065,11 @@ def _external_path(settings: Settings, path: str) -> str:
     ):
         return path
     return f"{root_path}{path}"
+
+
+def _download_filename(prefix: str, name: str, extension: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", name).strip("-").lower() or "budget"
+    return f"{prefix}-{slug}.{extension}"
 
 
 def _active_accounts(accounts: list[BudgetAccount]) -> list[BudgetAccount]:
@@ -983,14 +1428,12 @@ def _observe_counterparty_accounts(store: Store, parsed: ParseResult) -> None:
             )
 
 
-def _effective_self_names(store: Store, settings: Settings) -> list[str]:
-    return store.self_names() or list(settings.self_names)
+def _effective_self_names(store: Store) -> list[str]:
+    return store.self_names()
 
 
-def _apply_counterparty_account_labels(
-    parsed: ParseResult, *, store: Store, settings: Settings
-) -> None:
-    self_names = _effective_self_names(store, settings)
+def _apply_counterparty_account_labels(parsed: ParseResult, *, store: Store) -> None:
+    self_names = _effective_self_names(store)
     if not self_names:
         return
     counterparty_ibans = {
@@ -1662,7 +2105,8 @@ def _backend_match_groups(transactions: list[dict[str, Any]]) -> list[dict[str, 
             {
                 "payee_name": imported.get("payee_name") or existing.get("payee_name"),
                 "amount": imported.get("amount") or existing.get("amount"),
-                "account_name": imported.get("account_name") or existing.get("account_name"),
+                "account_name": imported.get("account_name")
+                or existing.get("account_name"),
                 "imported": imported,
                 "existing": existing,
             }

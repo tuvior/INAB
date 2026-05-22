@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+import json
 from typing import Any, Protocol
 
 from .budget_api import (
@@ -44,6 +45,25 @@ class OfficialYnabGateway:
 
     def list_budgets(self) -> list[BudgetRef]:
         return self.list_plans()
+
+    def export_budget_json(self, budget_id: str) -> dict[str, Any]:
+        ynab = _ynab()
+        try:
+            with ynab.ApiClient(
+                ynab.Configuration(access_token=self.access_token)
+            ) as api_client:
+                response = ynab.PlansApi(
+                    api_client
+                ).get_plan_by_id_without_preload_content(budget_id)
+        except Exception as exc:
+            raise YnabError(_safe_error("Could not export YNAB budget", exc)) from exc
+        try:
+            data = response.data
+            if isinstance(data, bytes):
+                data = data.decode("utf-8")
+            return json.loads(str(data))
+        except Exception as exc:
+            raise YnabError("Could not parse exported YNAB budget JSON.") from exc
 
     def list_plans(self) -> list[YnabPlan]:
         ynab = _ynab()

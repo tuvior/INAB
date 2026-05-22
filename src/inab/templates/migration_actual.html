@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Import in Actual - INAB{% endblock %}
+{% block content %}
+<section class="toolbar-section">
+  <div>
+    <h1>Import in Actual</h1>
+    <p class="muted">Use Actual's native nYNAB importer, then select the imported budget below.</p>
+  </div>
+</section>
+
+{% if error %}
+  <div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<section class="panel migration-import-card">
+  <div class="migration-download-callout">
+    <div>
+      <h2>Download the YNAB export</h2>
+      <p class="muted">Actual's nYNAB importer expects this JSON file.</p>
+    </div>
+    <a class="button" href="{{ url_path_for('migration_export_download', migration_id=migration.id) }}">Download JSON</a>
+  </div>
+  <div>
+    <h2>Actual import steps</h2>
+    <ol class="numbered-list">
+      <li>Open Actual{% if actual_base_url %} at <a href="{{ actual_base_url }}">{{ actual_base_url }}</a>{% endif %}.</li>
+      <li>Close the current file if needed.</li>
+      <li>Select Import file, choose nYNAB, and upload the JSON from INAB.</li>
+      <li>Return here after Actual finishes importing.</li>
+    </ol>
+  </div>
+</section>
+
+<section class="panel">
+  <form class="settings-row plan-selector" method="post" action="{{ url_path_for('migration_actual', migration_id=migration.id) }}">
+    <label class="plan-selector-field">
+      <span>Imported Actual budget</span>
+      <select name="actual_budget_id" required>
+        <option value="">Select the imported budget</option>
+        {% for budget in budgets %}
+          <option value="{{ budget.id }}" {% if budget.id == migration.actual_budget_id %}selected{% endif %}>{{ budget.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" {% if error %}disabled{% endif %}>Use this Actual budget</button>
+  </form>
+</section>
+{% endblock %}

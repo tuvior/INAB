@@ -18,6 +18,7 @@
         <a href="{{ url_path_for('import_history') }}">History</a>
         <a href="{{ url_path_for('rules') }}">Rules</a>
         <a href="{{ url_path_for('setup') }}">Setup</a>
+        <a href="{{ url_path_for('migration_start') }}">Migrate</a>
         {% if request.session.get('authenticated') %}
           <form method="post" action="{{ url_path_for('logout') }}">
             <button class="link-button" type="submit">Log out</button>
