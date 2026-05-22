@@ -22,6 +22,8 @@
   {% set result_transaction_ids = job.result.transaction_ids|default([], true) %}
   {% set result_skipped_duplicates = job.result.skipped_duplicates|default([], true) %}
   {% set result_skipped_transfer_counterparts = job.result.skipped_transfer_counterparts|default([], true) %}
+  {% set result_match_groups = job.result.backend_match_groups|default([], true) %}
+  {% set result_unmatched_transactions = job.result.backend_unmatched_transactions|default(job.result.backend_transactions|default([], true), true) %}
   {% if job.result.undo %}
     {% if job.result.undo.errors %}
       <div class="alert alert-error">
@@ -98,8 +100,45 @@
         </table>
       </div>
     {% endif %}
-    {% if job.result.backend_transactions %}
-      <h3 class="result-table-heading">Transactions returned by {{ result_backend_label }}</h3>
+    {% if result_match_groups %}
+      <h3 class="result-table-heading">Matched existing transactions</h3>
+      <div class="match-list">
+        {% for match in result_match_groups %}
+          {% set existing = match.existing %}
+          {% set imported = match.imported %}
+          <div class="match-card">
+            <div class="match-card-heading">
+              <div>
+                <strong>{{ match.payee_name or imported.payee_name or existing.payee_name }}</strong>
+                <span class="muted block">{{ match.account_name or imported.account_name or existing.account_name }}</span>
+              </div>
+              <div class="match-card-meta">
+                <span class="amount {% if match.amount|string|first == '-' %}negative{% else %}positive{% endif %}">{{ match.amount|money }}</span>
+                <span class="chip chip-imported">matched</span>
+              </div>
+            </div>
+            <div class="match-pair">
+              <div class="match-side">
+                <span class="match-label">Existing</span>
+                <span>{{ existing.date or "" }}</span>
+                <span>{{ existing.category_name or "Uncategorized" }}</span>
+                <span class="mono" title="{{ existing.id }}">{{ existing.id }}</span>
+              </div>
+              <div class="match-side">
+                <span class="match-label">Imported</span>
+                <span>{{ imported.date or "" }}</span>
+                <span>{{ imported.category_name or "Uncategorized" }}</span>
+                <span class="mono" title="{{ imported.import_id or imported.id }}">{{ imported.import_id or imported.id }}</span>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if result_unmatched_transactions %}
+      <h3 class="result-table-heading">
+        {% if result_match_groups %}Other transactions returned by {{ result_backend_label }}{% else %}Transactions returned by {{ result_backend_label }}{% endif %}
+      </h3>
       <div class="table-wrap mobile-card-wrap">
         <table class="mobile-card-table transaction-table">
           <thead>
@@ -113,7 +152,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for row in job.result.backend_transactions %}
+            {% for row in result_unmatched_transactions %}
               <tr>
                 <td data-label="Date">{{ row.date or "" }}</td>
                 <td data-label="Account">{{ row.account_name or row.account_id }}</td>

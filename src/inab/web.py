@@ -1597,6 +1597,21 @@ def _import_job(
             "skipped_transfer_counterparts": skipped_transfer_counterparts,
         }, "failed"
 
+    backend_match_groups = _backend_match_groups(create_result.transactions)
+    backend_grouped_ids = {
+        tx["id"]
+        for group in backend_match_groups
+        for tx in (group.get("existing"), group.get("imported"))
+        if isinstance(tx, dict) and tx.get("id")
+    }
+    backend_unmatched_transactions = [
+        tx
+        for tx in create_result.transactions
+        if tx.get("id") not in backend_grouped_ids
+    ]
+    backend_matched_count = len(backend_match_groups) + sum(
+        1 for tx in backend_unmatched_transactions if tx.get("matched_transaction_id")
+    )
     result = {
         "errors": [],
         "attempted_count": len(transactions_to_create),
@@ -1604,18 +1619,16 @@ def _import_job(
         "transaction_ids": create_result.transaction_ids,
         "submitted_transactions": submitted_transactions,
         "backend_transactions": create_result.transactions,
-        "backend_matched_count": sum(
-            1 for tx in create_result.transactions if tx.get("matched_transaction_id")
-        ),
+        "backend_match_groups": backend_match_groups,
+        "backend_unmatched_transactions": backend_unmatched_transactions,
+        "backend_matched_count": backend_matched_count,
         "backend_transfer_counterpart_count": sum(
             1 for tx in create_result.transactions if tx.get("transfer_transaction_id")
         ),
         "backend_duplicate_import_ids": create_result.duplicate_import_ids,
         "backend_label": settings.backend_label,
         "ynab_transactions": create_result.transactions,
-        "ynab_matched_count": sum(
-            1 for tx in create_result.transactions if tx.get("matched_transaction_id")
-        ),
+        "ynab_matched_count": backend_matched_count,
         "ynab_transfer_counterpart_count": sum(
             1 for tx in create_result.transactions if tx.get("transfer_transaction_id")
         ),
@@ -1629,6 +1642,44 @@ def _import_job(
         "transfer_count": len(transfer_payloads),
     }
     return result, "imported"
+
+
+def _backend_match_groups(transactions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id = {tx.get("id"): tx for tx in transactions if tx.get("id")}
+    groups: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for tx in transactions:
+        tx_id = tx.get("id")
+        matched_id = tx.get("matched_transaction_id")
+        if not tx_id or not matched_id or tx_id in seen_ids:
+            continue
+        matched = by_id.get(matched_id)
+        if not matched:
+            continue
+        imported, existing = _matched_imported_existing(tx, matched)
+        seen_ids.update({tx_id, matched_id})
+        groups.append(
+            {
+                "payee_name": imported.get("payee_name") or existing.get("payee_name"),
+                "amount": imported.get("amount") or existing.get("amount"),
+                "account_name": imported.get("account_name") or existing.get("account_name"),
+                "imported": imported,
+                "existing": existing,
+            }
+        )
+    return groups
+
+
+def _matched_imported_existing(
+    left: dict[str, Any], right: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    left_has_import = bool(left.get("import_id"))
+    right_has_import = bool(right.get("import_id"))
+    if left_has_import and not right_has_import:
+        return left, right
+    if right_has_import and not left_has_import:
+        return right, left
+    return right, left
 
 
 def _import_transaction(

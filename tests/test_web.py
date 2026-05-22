@@ -556,24 +556,26 @@ def test_import_page_shows_submitted_and_returned_ynab_transactions(
         ynab_account_name="Checking",
         transfer_payee_id="tp-checking",
     )
-    gateway.returned_transaction_ids = ["ynab-1", "ynab-2"]
+    gateway.returned_transaction_ids = ["manual-1", "imported-1"]
     gateway.returned_transactions = [
         {
-            "id": "ynab-1",
+            "id": "manual-1",
             "date": "2026-04-10",
             "amount": "-10.000",
             "account_name": "Checking",
             "payee_name": "Payee",
-            "import_id": "INAB:REF1",
-            "matched_transaction_id": "manual-1",
+            "category_name": "Split",
+            "matched_transaction_id": "imported-1",
         },
         {
-            "id": "ynab-2",
+            "id": "imported-1",
             "date": "2026-04-10",
             "amount": "-10.000",
             "account_name": "Checking",
             "payee_name": "Payee",
+            "category_name": "Everyday: Food",
             "import_id": "INAB:REF1",
+            "matched_transaction_id": "manual-1",
         },
     ]
     content = camt_document(
@@ -601,13 +603,16 @@ def test_import_page_shows_submitted_and_returned_ynab_transactions(
     assert "Import result" in imported.text
     assert "Matched existing" in imported.text
     assert "Bank rows submitted by INAB" in imported.text
-    assert "Transactions returned by YNAB" in imported.text
-    assert "Matched existing transaction: manual-1" in imported.text
+    assert "Matched existing transactions" in imported.text
+    assert "Existing" in imported.text
+    assert "Imported" in imported.text
+    assert "manual-1" in imported.text
     assert "INAB:REF1" in imported.text
     job = store.get_job(job_id)
     assert job is not None
     assert job["result"]["submitted_transactions"][0]["import_id"] == "INAB:REF1"
-    assert job["result"]["ynab_transactions"][0]["matched_transaction_id"] == "manual-1"
+    assert job["result"]["backend_match_groups"][0]["existing"]["id"] == "manual-1"
+    assert job["result"]["backend_match_groups"][0]["imported"]["id"] == "imported-1"
     assert job["result"]["ynab_matched_count"] == 1
 
 
