@@ -224,7 +224,7 @@ Recommended screens:
    - Show the proposed Actual note output for every category with a target.
    - Group rows by conversion confidence: exact, approximate, needs review, unsupported.
    - Let the user disable individual generated template lines or mark them as comment-only suggestions.
-   - Surface review markers as explicit wizard feedback, not only as text hidden in generated notes.
+   - Surface review status as explicit wizard feedback, not only as text hidden in generated notes.
    - Show counts for active templates, comment-only suggestions, unsupported targets, and unresolved review items.
    - Require a user decision for every `needs review` item: accept active template, keep as comment-only suggestion, edit generated template text, or skip.
    - Block the "continue" path only for parser errors, not for low-confidence conversions.
@@ -253,9 +253,9 @@ Recommended screens:
    - Save the category match map in the migration workspace so the wizard can be resumed.
 
 8. **Patch Budget Templates**
-   - Show a pre-apply review summary with all categories that still have review markers.
-   - Require confirmation if any review marker will be written as comment-only text instead of an active template.
-   - Append or replace an INAB-delimited block in each matched Actual category note.
+   - Show a pre-apply review summary with all categories that still need review.
+   - Require confirmation if any proposal will be written as comment-only text instead of an active template.
+   - Append the accepted template line in each matched Actual category note.
    - Preserve existing notes.
    - Use active `#template` / `#goal` lines only for accepted conversions.
    - Use comment-only suggestions for uncertain conversions.
@@ -270,7 +270,7 @@ Recommended screens:
 
 10. **Verify**
    - Ask the user to run `Check templates` in Actual's budget template menu.
-   - Show post-apply feedback for review markers: which categories were patched with active templates, which were patched with comment-only suggestions, which were skipped, and which still need manual work in Actual.
+   - Show post-apply feedback: which categories were patched with active templates, which were patched with comment-only suggestions, which were skipped, and which still need manual work in Actual.
    - Show cleanup reminders from Actual's nYNAB docs: credit-card debt, `To Budget` / future-month money, and duplicate categories/groups.
    - Offer to switch INAB startup configuration guidance from YNAB to Actual.
 
@@ -279,7 +279,7 @@ The wizard should be resumable. A migration state record should track:
 - source YNAB plan ID and name
 - JSON export path/checksum
 - target conversion decisions
-- unresolved/reviewed target markers
+- unresolved/reviewed target statuses
 - selected Actual budget file
 - category match map
 - account match map
@@ -357,12 +357,13 @@ Suggested conversion table:
 | Have a balance by date | `goal_type=TBD`, `goal_target_date` | `#template <amount> by <YYYY-MM>` plus optional `#goal <amount>` | Medium-high |
 | Needed for spending, refill up to | `goal_type=NEED`, `goal_needs_whole_amount=false` | `#template up to <amount>` for monthly targets | Medium |
 | Needed for spending, set aside another | `goal_type=NEED`, `goal_needs_whole_amount=true` | `#template <amount>` for monthly targets | Medium-high |
+| Dated repeating refill target | `goal_type=NEED`, `goal_needs_whole_amount=false`, target date and cadence | `#template <amount> repeat every <period> starting <YYYY-MM-DD> up to <amount>` | Medium |
 | Weekly recurring target | cadence/frequency/day fields | `#template <amount> repeat every week starting <YYYY-MM-DD>` | Medium |
 | Every N weeks/months/years | cadence/frequency/date fields | `#template <amount> repeat every <N> <period> starting <YYYY-MM-DD>` or `#template <amount> by <YYYY-MM> repeat every <period>` | Medium |
-| Spend-by date with allowed spending period | YNAB target date/cadence fields | `#template <amount> by <YYYY-MM> spend from <YYYY-MM>` only when period can be inferred | Low-medium |
-| Credit card payoff targets | credit-card payment category target fields | Manual-review block; optionally generate `#template <amount>` or `#template <amount> by <YYYY-MM>` | Low |
+| Spend-by date with allowed spending period | Manual review | `#template <amount> by <YYYY-MM> spend from <YYYY-MM>` only when the user confirms a spending window | Low |
+| Credit card payoff targets | credit-card payment category target fields | Manual review; optionally generate `#template <amount>` or `#template <amount> by <YYYY-MM>` | Low |
 
-The migration should prefer conservative conversions. When target fields cannot be mapped exactly, generate no active template or prefix it with a review marker rather than creating misleading automation. For example:
+The migration should prefer conservative conversions. When target fields cannot be mapped exactly, generate no active template or make the proposal comment-only rather than creating misleading automation. For example:
 
 ```text
 YNAB target needs review:
@@ -405,7 +406,7 @@ actualpy exposes writable category notes, so generated templates can be appended
 
 - Preserve existing Actual category notes when re-running.
 - Preserve YNAB category notes if the YNAB API/export exposes them.
-- Put generated templates in a delimited block so they can be updated idempotently.
+- Append only reviewed template lines, and store before/after patch data in the migration report for rollback.
 - Never create more than one active `up to` template in a category, because Actual documents that only one `up to` template is allowed.
 
 Example:

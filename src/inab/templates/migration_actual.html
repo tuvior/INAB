@@ -4,7 +4,7 @@
 <section class="toolbar-section">
   <div>
     <h1>Import in Actual</h1>
-    <p class="muted">Use Actual's native nYNAB importer, then select the imported budget below.</p>
+    <p class="muted">Use Actual's native nYNAB importer, then come back to select the imported budget.</p>
   </div>
 </section>
 
@@ -26,23 +26,38 @@
       <li>Open Actual{% if actual_base_url %} at <a href="{{ actual_base_url }}">{{ actual_base_url }}</a>{% endif %}.</li>
       <li>Close the current file if needed.</li>
       <li>Select Import file, choose nYNAB, and upload the JSON from INAB.</li>
-      <li>Return here after Actual finishes importing.</li>
+      <li>Return here after Actual finishes importing, then continue.</li>
     </ol>
   </div>
+  {% if not migration.actual_import_confirmed %}
+    <form method="post" action="{{ url_path_for('migration_actual', migration_id=migration.id) }}">
+      <input type="hidden" name="action" value="imported">
+      <button type="submit" {% if error %}disabled{% endif %}>I imported this in Actual</button>
+    </form>
+  {% endif %}
 </section>
 
-<section class="panel">
-  <form class="settings-row plan-selector" method="post" action="{{ url_path_for('migration_actual', migration_id=migration.id) }}">
-    <label class="plan-selector-field">
-      <span>Imported Actual budget</span>
-      <select name="actual_budget_id" required>
-        <option value="">Select the imported budget</option>
-        {% for budget in budgets %}
-          <option value="{{ budget.id }}" {% if budget.id == migration.actual_budget_id %}selected{% endif %}>{{ budget.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <button type="submit" {% if error %}disabled{% endif %}>Use this Actual budget</button>
-  </form>
-</section>
+{% if migration.actual_import_confirmed %}
+  <section class="panel">
+    <div class="panel-heading">
+      <div>
+        <h2>Select the imported budget</h2>
+        <p class="muted">This list is loaded after you confirm the import, so the new Actual file can appear here.</p>
+      </div>
+      <a class="button secondary" href="{{ url_path_for('migration_actual', migration_id=migration.id) }}">Refresh list</a>
+    </div>
+    <form class="settings-row plan-selector" method="post" action="{{ url_path_for('migration_actual', migration_id=migration.id) }}">
+      <label class="plan-selector-field">
+        <span>Imported Actual budget</span>
+        <select name="actual_budget_id" required>
+          <option value="">Select the imported budget</option>
+          {% for budget in budgets %}
+            <option value="{{ budget.id }}" {% if budget.id == migration.actual_budget_id %}selected{% endif %}>{{ budget.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" {% if error %}disabled{% endif %}>Continue with this budget</button>
+    </form>
+  </section>
+{% endif %}
 {% endblock %}

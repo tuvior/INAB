@@ -22,9 +22,9 @@
     <p class="muted">reviewed proposals</p>
   </div>
   <div class="panel">
-    <h2>Note patches</h2>
+    <h2>Template lines</h2>
     <p class="metric">{{ migration.note_patch_report|default([], true)|length }}</p>
-    <p class="muted">Actual category notes attempted</p>
+    <p class="muted">note updates attempted</p>
   </div>
   <div class="panel">
     <h2>Local state</h2>
@@ -35,29 +35,33 @@
 <section class="panel">
   <div class="panel-heading">
     <div>
-      <h2>Explicit write actions</h2>
-      <p class="muted">Run these after reviewing matches. Re-running note patching skips categories that already contain the migration marker.</p>
+      <h2>Next actions</h2>
+      <p class="muted">Each action writes one separate part of the migration. Run only the steps you want.</p>
     </div>
   </div>
-  <div class="toolbar-actions wrap-actions">
+  <div class="migration-action-grid">
     <form method="post" action="{{ url_path_for('migration_patch_notes', migration_id=migration.id) }}">
-      <button type="submit">Patch Actual category notes</button>
+      <p>Add the reviewed template lines to matched Actual category notes.</p>
+      <button type="submit">Add template lines</button>
     </form>
     <form method="post" action="{{ url_path_for('migration_rollback_notes', migration_id=migration.id) }}">
-      <button class="secondary danger" type="submit">Rollback note patches</button>
+      <p>Remove the template lines added by this migration when the current note still matches the patch report.</p>
+      <button class="secondary danger" type="submit">Remove added template lines</button>
     </form>
     <form method="post" action="{{ url_path_for('migration_migrate_state', migration_id=migration.id) }}">
-      <button type="submit">Copy INAB-local state</button>
+      <p>Copy eligible INAB rules, account mappings, aliases, and suggestions into the Actual backend store.</p>
+      <button type="submit">Copy rules and mappings</button>
     </form>
     <form method="post" action="{{ url_path_for('migration_switch_to_actual', migration_id=migration.id) }}">
-      <button class="secondary" type="submit">Switch INAB to Actual</button>
+      <p>Use the Actual backend for setup, imports, rules, and history from now on.</p>
+      <button class="secondary" type="submit">Use Actual in INAB</button>
     </form>
   </div>
 </section>
 
 {% if migration.note_patch_report %}
 <section class="panel">
-  <h2>Note patch report</h2>
+  <h2>Template line report</h2>
   <div class="table-wrap mobile-card-wrap">
     <table class="mobile-card-table">
       <thead><tr><th>Category</th><th>Status</th><th>Error</th></tr></thead>

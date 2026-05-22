@@ -101,28 +101,20 @@ def main() -> None:
         print("deleted transfer verification transactions")
 
     if category_id:
-        marker = "INAB Actual integration verification"
         patch_report = gateway.append_category_note_blocks(
             budget_id,
             [
                 {
                     "category_id": category_id,
                     "category_name": category_id,
-                    "block": "\n".join(
-                        [
-                            f"<!-- {marker} start -->",
-                            "#template 0.01",
-                            f"<!-- {marker} end -->",
-                        ]
-                    ),
+                    "source_category_id": "verification",
+                    "migration_id": "verification",
+                    "block": "#template 0.01",
                 }
             ],
-            marker=marker,
         )
         print(f"note patch report: {patch_report}")
-        rollback_report = gateway.rollback_category_note_blocks(
-            budget_id, [category_id], marker=marker
-        )
+        rollback_report = gateway.rollback_category_note_blocks(budget_id, patch_report)
         print(f"note rollback report: {rollback_report}")
 
 

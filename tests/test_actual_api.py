@@ -332,22 +332,20 @@ def test_actual_gateway_patches_and_rolls_back_category_notes(
             {
                 "category_id": "cat-food",
                 "category_name": "Everyday: Food",
-                "block": "<!-- INAB YNAB target migration mig-1 start -->\n#template 25.00\n<!-- INAB YNAB target migration mig-1 end -->",
+                "source_category_id": "ynab-food",
+                "migration_id": "mig-1",
+                "block": "#template 25.00",
             }
         ],
-        marker="INAB YNAB target migration mig-1",
     )
 
     assert report[0]["patched"] is True
-    assert (
-        "Existing note\n\n<!-- INAB YNAB target migration mig-1 start -->"
-        in category.notes
-    )
+    assert category.notes == "Existing note\n\n#template 25.00"
+    assert report[0]["before"] == "Existing note"
+    assert report[0]["after"] == "Existing note\n\n#template 25.00"
     assert FakeActual.instances[-1].committed is True
 
-    rollback = gateway.rollback_category_note_blocks(
-        "budget-id", ["cat-food"], marker="INAB YNAB target migration mig-1"
-    )
+    rollback = gateway.rollback_category_note_blocks("budget-id", report)
 
     assert rollback[0]["rolled_back"] is True
     assert category.notes == "Existing note"

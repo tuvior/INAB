@@ -12,8 +12,6 @@ from typing import Any
 from .budget_api import BudgetAccount, BudgetCategory
 from .store import Store
 
-MARKER_PREFIX = "INAB YNAB target migration"
-
 
 @dataclass(frozen=True)
 class MigrationWorkspace:
@@ -55,7 +53,10 @@ class MigrationWorkspace:
 
     def save_export(self, migration_id: str, export: dict[str, Any]) -> Path:
         path = self.export_path(migration_id)
-        path.write_text(json.dumps(export, indent=2, sort_keys=True), encoding="utf-8")
+        normalized = normalize_ynab_export_for_actual(export)
+        path.write_text(
+            json.dumps(normalized, indent=2, sort_keys=True), encoding="utf-8"
+        )
         return path
 
     def export(self, migration_id: str) -> dict[str, Any]:
@@ -82,6 +83,19 @@ def budget_from_export(export: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, dict):
             return value
     return data if isinstance(data, dict) else {}
+
+
+def normalize_ynab_export_for_actual(export: dict[str, Any]) -> dict[str, Any]:
+    data = export.get("data")
+    if not isinstance(data, dict):
+        return export
+    if "budget" in data or "plan" not in data:
+        return export
+    normalized = dict(export)
+    normalized_data = dict(data)
+    normalized_data["budget"] = normalized_data.pop("plan")
+    normalized["data"] = normalized_data
+    return normalized
 
 
 def export_counts(export: dict[str, Any]) -> dict[str, int]:
@@ -180,28 +194,16 @@ def build_note_patches(
         if action == "comment" and not line.startswith("# "):
             line = f"# {line}"
         item = items_by_id.get(source_category_id, {})
-        marker = marker_for(migration_id)
-        block = "\n".join(
-            [
-                f"<!-- {marker} start -->",
-                f"<!-- Source YNAB category: {item.get('category_group_name', '')}: {item.get('category_name', '')} -->",
-                line,
-                f"<!-- {marker} end -->",
-            ]
-        )
         patches.append(
             {
                 "category_id": match["actual_category_id"],
                 "category_name": match.get("actual_category_name", ""),
                 "source_category_id": source_category_id,
-                "block": block,
+                "migration_id": migration_id,
+                "block": line,
             }
         )
     return patches
-
-
-def marker_for(migration_id: str) -> str:
-    return f"{MARKER_PREFIX} {migration_id}"
 
 
 def match_categories(
@@ -370,6 +372,7 @@ def markdown_report(report: dict[str, Any]) -> str:
 
 def _target_item(category: dict[str, Any], goal_type: str) -> dict[str, Any]:
     target = _amount(category.get("goal_target"))
+    target_month = _target_month(category)
     group_name = str(category.get("category_group_name") or "")
     category_name = str(category.get("name") or "")
     base = {
@@ -378,9 +381,11 @@ def _target_item(category: dict[str, Any], goal_type: str) -> dict[str, Any]:
         "category_group_name": group_name,
         "goal_type": goal_type,
         "goal_target": target,
-        "goal_target_month": category.get("goal_target_month"),
+        "goal_target_month": target_month,
         "goal_target_date": category.get("goal_target_date"),
         "goal_cadence": category.get("goal_cadence"),
+        "goal_cadence_frequency": category.get("goal_cadence_frequency"),
+        "goal_creation_month": category.get("goal_creation_month"),
         "goal_needs_whole_amount": category.get("goal_needs_whole_amount"),
         "confidence": "unsupported",
         "line": "",
@@ -395,42 +400,138 @@ def _target_item(category: dict[str, Any], goal_type: str) -> dict[str, Any]:
             "line": f"#template {target}",
             "reason": "Monthly funding target.",
         }
-    if goal_type in {"TB", "TARGET_BALANCE"} and not (
-        category.get("goal_target_month") or category.get("goal_target_date")
-    ):
+    if goal_type in {"TB", "TARGET_BALANCE"} and not target_month:
         return {
             **base,
             "confidence": "exact",
             "line": f"#goal {target}",
             "reason": "Target balance without date.",
         }
-    if goal_type in {"NEED", "NEEDED_SPENDING", "SPENDING"} and _monthly(category):
+    if goal_type in {"TBD", "TARGET_BALANCE_BY_DATE"} or (
+        goal_type in {"TB", "TARGET_BALANCE"} and target_month
+    ):
+        return _by_date_target(base, category, target, reason="Target balance by date.")
+    if goal_type in {"NEED", "NEEDED_SPENDING", "SPENDING"}:
         needs_whole_amount = category.get("goal_needs_whole_amount")
-        if needs_whole_amount is True:
+        if target_month:
+            return _needed_by_date_target(base, category, target, needs_whole_amount)
+        if _monthly(category):
+            if needs_whole_amount is True:
+                return {
+                    **base,
+                    "confidence": "exact",
+                    "line": f"#template {target}",
+                    "reason": "Monthly needed-for-spending target, set aside another.",
+                }
+            if needs_whole_amount is False:
+                return {
+                    **base,
+                    "confidence": "exact",
+                    "line": f"#template up to {target}",
+                    "reason": "Monthly needed-for-spending target, refill up to.",
+                }
             return {
                 **base,
-                "confidence": "exact",
-                "line": f"#template {target}",
-                "reason": "Monthly needed-for-spending target, set aside another.",
-            }
-        if needs_whole_amount is False:
-            return {
-                **base,
-                "confidence": "exact",
+                "confidence": "approximate",
                 "line": f"#template up to {target}",
-                "reason": "Monthly needed-for-spending target, refill up to.",
+                "reason": "Monthly needed-for-spending target with unknown rollover behavior.",
             }
-        return {
-            **base,
-            "confidence": "approximate",
-            "line": f"#template up to {target}",
-            "reason": "Monthly needed-for-spending target with unknown rollover behavior.",
-        }
+        cadence = _cadence(category)
+        start_date = _target_date(category) or _creation_date(category)
+        if cadence and cadence[1] == "weeks" and start_date:
+            repeat = _repeat_phrase(*cadence)
+            if needs_whole_amount is True:
+                return {
+                    **base,
+                    "confidence": "approximate",
+                    "line": f"#template {target} repeat {repeat} starting {start_date}",
+                    "reason": "Weekly needed-for-spending target.",
+                }
+            if needs_whole_amount is False:
+                return {
+                    **base,
+                    "confidence": "approximate",
+                    "line": f"#template {target} repeat {repeat} starting {start_date} up to {target}",
+                    "reason": "Weekly refill target.",
+                }
     return {
         **base,
         "confidence": "needs_review",
         "line": f"# Review YNAB {goal_type} target for {target}",
         "reason": "Target has date, cadence, debt, or unsupported semantics.",
+    }
+
+
+def _by_date_target(
+    base: dict[str, Any], category: dict[str, Any], target: str, *, reason: str
+) -> dict[str, Any]:
+    target_month = _target_month(category)
+    if not target_month:
+        return {
+            **base,
+            "confidence": "needs_review",
+            "line": f"# Review YNAB {base['goal_type']} target for {target}",
+            "reason": "Target date was missing.",
+        }
+    cadence = _cadence(category)
+    repeat = _by_repeat_suffix(cadence)
+    line = f"#template {target} by {target_month}{repeat}"
+    return {
+        **base,
+        "confidence": "exact" if not repeat else "approximate",
+        "line": line,
+        "reason": f"{reason}{' Repeating cadence included.' if repeat else ''}",
+    }
+
+
+def _needed_by_date_target(
+    base: dict[str, Any],
+    category: dict[str, Any],
+    target: str,
+    needs_whole_amount: bool | None,
+) -> dict[str, Any]:
+    target_month = _target_month(category)
+    if not target_month:
+        return {
+            **base,
+            "confidence": "needs_review",
+            "line": f"# Review YNAB NEED target for {target}",
+            "reason": "Target date was missing.",
+        }
+    cadence = _cadence(category)
+    repeat = _by_repeat_suffix(cadence)
+    line = f"#template {target} by {target_month}{repeat}"
+    if needs_whole_amount is True:
+        return {
+            **base,
+            "confidence": "exact",
+            "line": line,
+            "reason": "Needed-for-spending target by date, set aside another.",
+        }
+    if needs_whole_amount is False:
+        target_date = _target_date(category)
+        if cadence and target_date:
+            repeat_phrase = _repeat_phrase(*cadence)
+            return {
+                **base,
+                "confidence": "approximate",
+                "line": (
+                    f"#template {target} repeat {repeat_phrase} "
+                    f"starting {target_date} up to {target}"
+                ),
+                "reason": "Needed-for-spending target by date, refill up to.",
+            }
+        return {
+            **base,
+            "confidence": "approximate",
+            "line": line,
+            "reason": "Needed-for-spending target by date, refill behavior approximated.",
+        }
+    return {
+        **base,
+        "confidence": "needs_review",
+        "line": line,
+        "reason": "Needed-for-spending target by date with unknown rollover behavior.",
     }
 
 
@@ -447,6 +548,79 @@ def _monthly(category: dict[str, Any]) -> bool:
     cadence = category.get("goal_cadence")
     frequency = category.get("goal_cadence_frequency")
     return cadence in (None, 1, "1") and frequency in (None, 1, "1")
+
+
+def _target_month(category: dict[str, Any]) -> str | None:
+    value = category.get("goal_target_date") or category.get("goal_target_month")
+    return _month_string(value)
+
+
+def _target_date(category: dict[str, Any]) -> str | None:
+    value = category.get("goal_target_date") or category.get("goal_target_month")
+    if value is None:
+        return None
+    text = str(value)
+    return text[:10] if len(text) >= 10 else None
+
+
+def _creation_date(category: dict[str, Any]) -> str | None:
+    value = category.get("goal_creation_month")
+    if value is None:
+        return None
+    text = str(value)
+    return text[:10] if len(text) >= 10 else None
+
+
+def _month_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) < 7:
+        return None
+    return text[:7]
+
+
+def _cadence(category: dict[str, Any]) -> tuple[int, str] | None:
+    cadence = _int_value(category.get("goal_cadence"))
+    frequency = _int_value(category.get("goal_cadence_frequency")) or 1
+    if cadence in (None, 0):
+        return None
+    if cadence == 1:
+        return (frequency, "months")
+    if cadence == 2:
+        return (frequency, "weeks")
+    if cadence == 13:
+        return (frequency, "years")
+    if 3 <= cadence <= 12:
+        return (cadence - 1, "months")
+    if cadence == 14:
+        return (2, "years")
+    return None
+
+
+def _by_repeat_suffix(cadence: tuple[int, str] | None) -> str:
+    if cadence is None:
+        return ""
+    amount, unit = cadence
+    if unit not in {"months", "years"}:
+        return ""
+    return f" repeat {_repeat_phrase(amount, unit)}"
+
+
+def _repeat_phrase(amount: int, unit: str) -> str:
+    singular = unit[:-1] if amount == 1 and unit.endswith("s") else unit
+    if amount == 1:
+        return f"every {singular}"
+    return f"every {amount} {unit}"
+
+
+def _int_value(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _latest_month(budget: dict[str, Any]) -> dict[str, Any]:

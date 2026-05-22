@@ -41,8 +41,8 @@ With `--apply`, the script:
 
 - creates a small test transaction and then deletes it through INAB's Actual gateway;
 - creates a small transfer pair and then deletes both sides;
-- appends an INAB-marked category-note block when `INAB_VERIFY_CATEGORY_ID` is set;
-- rolls back the note block;
+- appends a category-note template line when `INAB_VERIFY_CATEGORY_ID` is set;
+- rolls back the note line through the stored patch report;
 - reports each created and deleted Actual transaction ID.
 
 Only run this against a disposable budget. actualpy commits are not atomic if interrupted, so inspect the Actual UI afterward and delete any leftover verification rows manually if the script is stopped midway.

@@ -215,7 +215,7 @@ class ActualBudgetGateway:
             ) from exc
 
     def append_category_note_blocks(
-        self, budget_id: str, patches: list[dict[str, str]], *, marker: str
+        self, budget_id: str, patches: list[dict[str, str]]
     ) -> list[dict[str, str | bool | None]]:
         report: list[dict[str, str | bool | None]] = []
         if not patches:
@@ -238,13 +238,13 @@ class ActualBudgetGateway:
                         )
                         continue
                     existing = getattr(category, "notes", None) or ""
-                    if marker in existing:
+                    if _note_block_exists(existing, block):
                         report.append(
                             {
                                 "category_id": category_id,
                                 "category_name": patch.get("category_name"),
                                 "patched": False,
-                                "error": "Marker already exists.",
+                                "error": "Template line already exists.",
                             }
                         )
                         continue
@@ -253,6 +253,9 @@ class ActualBudgetGateway:
                         {
                             "category_id": category_id,
                             "category_name": patch.get("category_name"),
+                            "source_category_id": patch.get("source_category_id"),
+                            "migration_id": patch.get("migration_id"),
+                            "block": block,
                             "patched": True,
                             "before": existing,
                             "after": category.notes,
@@ -267,15 +270,21 @@ class ActualBudgetGateway:
         return report
 
     def rollback_category_note_blocks(
-        self, budget_id: str, category_ids: list[str], *, marker: str
+        self, budget_id: str, patch_report: list[dict[str, Any]]
     ) -> list[dict[str, str | bool | None]]:
         report: list[dict[str, str | bool | None]] = []
-        if not category_ids:
+        if not patch_report:
             return report
         try:
             with self._actual(file=budget_id) as actual:
                 database = _database()
-                for category_id in category_ids:
+                for patch in patch_report:
+                    if not patch.get("patched"):
+                        continue
+                    category_id = str(patch.get("category_id") or "")
+                    before = str(patch.get("before") or "")
+                    after = str(patch.get("after") or "")
+                    block = str(patch.get("block") or "")
                     category = actual.session.get(database.Categories, category_id)
                     if category is None or _deleted(category):
                         report.append(
@@ -287,13 +296,15 @@ class ActualBudgetGateway:
                         )
                         continue
                     existing = getattr(category, "notes", None) or ""
-                    updated = _remove_marked_note_block(existing, marker)
+                    updated = _rollback_note_block(
+                        existing, before=before, after=after, block=block
+                    )
                     if updated == existing:
                         report.append(
                             {
                                 "category_id": category_id,
                                 "rolled_back": False,
-                                "error": "Marker not found.",
+                                "error": "Current note no longer matches the patch report.",
                             }
                         )
                         continue
@@ -449,15 +460,19 @@ def _append_note_block(existing: str, block: str) -> str:
     return f"{existing}\n\n{block}"
 
 
-def _remove_marked_note_block(existing: str, marker: str) -> str:
-    start_marker = f"<!-- {marker} start -->"
-    end_marker = f"<!-- {marker} end -->"
-    start = existing.find(start_marker)
-    end = existing.find(end_marker)
-    if start < 0 or end < start:
-        return existing
-    end += len(end_marker)
-    return (existing[:start].rstrip() + "\n\n" + existing[end:].lstrip()).strip()
+def _note_block_exists(existing: str, block: str) -> bool:
+    return block.strip() in {line.strip() for line in existing.splitlines()}
+
+
+def _rollback_note_block(existing: str, *, before: str, after: str, block: str) -> str:
+    if existing == after:
+        return before
+    if not before and existing.strip() == block.strip():
+        return ""
+    suffix = f"\n\n{block.strip()}"
+    if existing.rstrip().endswith(suffix):
+        return existing.rstrip()[: -len(suffix)].rstrip()
+    return existing
 
 
 def _safe_error(message: str, exc: Exception) -> str:

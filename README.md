@@ -150,12 +150,12 @@ The wizard does not silently migrate data. It helps you:
 - review proposed Actual Budget template lines derived from YNAB targets;
 - import the JSON in Actual using Actual's built-in nYNAB importer;
 - select the imported Actual budget and match categories/accounts;
-- explicitly patch Actual category notes with INAB-marked template blocks;
+- explicitly add reviewed template lines to Actual category notes;
 - explicitly copy selected INAB-local state from the YNAB state database to the Actual state database.
 
 The local-state migration can copy account mappings, import rules with matched categories, counterparty labels, own-name aliases, and observed account suggestions. It does not copy import history, undo IDs, or previously created backend transaction IDs as active Actual state.
 
-Actual Budget templates are experimental. Category-note patching appends an INAB-marked block and includes a rollback action for that block where possible.
+Actual Budget templates are experimental. Category-note patching appends only the reviewed template line and stores before/after patch data so the wizard can roll it back when the note still matches the patch report.
 
 For real-server verification against a disposable Actual budget, see [docs/actual-integration-verification.md](docs/actual-integration-verification.md).
 

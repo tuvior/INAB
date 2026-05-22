@@ -493,6 +493,33 @@ label span {
   flex-wrap: wrap;
 }
 
+.migration-action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.migration-action-grid form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.migration-action-grid p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.migration-action-grid button {
+  margin-top: auto;
+  width: 100%;
+}
+
 .numbered-list {
   margin: 0 0 14px;
   padding-left: 22px;
@@ -1088,7 +1115,8 @@ tr:last-child td {
   }
 
   .setup-overview-grid,
-  .migration-step-grid {
+  .migration-step-grid,
+  .migration-action-grid {
     grid-template-columns: 1fr;
   }
 

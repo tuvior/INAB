@@ -45,7 +45,7 @@ def test_migration_wizard_generates_ynab_export(
     login(client)
     gateway.export_payload = {
         "data": {
-            "budget": {
+            "plan": {
                 "accounts": [{"id": "account-1"}],
                 "payees": [{"id": "payee-1"}],
                 "transactions": [{"id": "tx-1"}],
@@ -88,6 +88,7 @@ def test_migration_wizard_generates_ynab_export(
     export_url = source.headers["location"].replace("/analyze", "/export")
     download = client.get(export_url)
     assert download.status_code == 200
+    assert "plan" not in download.json()["data"]
     assert download.json()["data"]["budget"]["accounts"][0]["id"] == "account-1"
 
 
@@ -115,9 +116,54 @@ def test_migration_finish_exposes_explicit_write_actions(
     response = client.get(f"/migration/ynab-to-actual/{migration_id}/finish")
 
     assert response.status_code == 200
-    assert "Patch Actual category notes" in response.text
-    assert "Copy INAB-local state" in response.text
-    assert "Switch INAB to Actual" in response.text
+    assert "Add template lines" in response.text
+    assert "Copy rules and mappings" in response.text
+    assert "Use Actual in INAB" in response.text
+
+
+def test_migration_actual_import_step_precedes_budget_selection(
+    tmp_path: Path, fake_gateway: FakeGateway
+) -> None:
+    settings = Settings(
+        data_dir=tmp_path,
+        ynab_access_token="fake-token",
+        actual_base_url="https://actual.example",
+        actual_password="secret",
+        username="inab",
+        password="secret",
+        session_secret="test-session",
+    )
+    store = Store(settings.database_path)
+    client = TestClient(
+        create_app(
+            settings=settings,
+            store=store,
+            gateway_factory=lambda _settings: fake_gateway,
+        )
+    )
+    login(client)
+    workspace = MigrationWorkspace(tmp_path)
+    migration_id = workspace.create(
+        source_budget_id="plan-1", source_budget_name="Household"
+    )
+    workspace.save_export(migration_id, {"data": {"budget": {}}})
+
+    import_step = client.get(f"/migration/ynab-to-actual/{migration_id}/actual")
+
+    assert import_step.status_code == 200
+    assert "I imported this in Actual" in import_step.text
+    assert "Select the imported budget" not in import_step.text
+
+    confirmed = client.post(
+        f"/migration/ynab-to-actual/{migration_id}/actual",
+        data={"action": "imported"},
+        follow_redirects=False,
+    )
+
+    assert confirmed.status_code == 303
+    select_step = client.get(confirmed.headers["location"])
+    assert "Select the imported budget" in select_step.text
+    assert "Continue with this budget" in select_step.text
 
 
 def test_import_history_requires_auth(

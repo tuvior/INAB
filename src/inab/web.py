@@ -37,7 +37,6 @@ from .migration import (
     build_note_patches,
     default_decisions,
     export_counts,
-    marker_for,
     markdown_report,
     match_accounts,
     match_categories,
@@ -690,12 +689,12 @@ def create_app(
         state = workspace.state(migration_id)
         budgets = []
         error = None
-        if base_settings.actual_configured:
+        if state.get("actual_import_confirmed") and base_settings.actual_configured:
             try:
                 budgets = backend_manager.gateway("actual").list_budgets()
             except BudgetError as exc:
                 error = str(exc)
-        else:
+        elif not base_settings.actual_configured:
             error = "Actual Budget env configuration is incomplete."
         return _render(
             request,
@@ -716,6 +715,13 @@ def create_app(
         workspace = MigrationWorkspace(base_settings.data_dir)
         state = workspace.state(migration_id)
         form = await request.form()
+        if form.get("action") == "imported":
+            state["actual_import_confirmed"] = True
+            state["step"] = "actual_imported"
+            workspace.save_state(migration_id, state)
+            return _redirect(
+                request, f"/migration/ynab-to-actual/{migration_id}/actual"
+            )
         actual_budget_id = str(form.get("actual_budget_id") or "")
         if not actual_budget_id:
             raise HTTPException(
@@ -846,9 +852,7 @@ def create_app(
             raise HTTPException(
                 status_code=500, detail="Actual note patching is not available."
             )
-        report = gateway.append_category_note_blocks(
-            actual_budget_id, patches, marker=marker_for(migration_id)
-        )
+        report = gateway.append_category_note_blocks(actual_budget_id, patches)
         state["note_patch_report"] = report
         state["step"] = "notes_patched"
         workspace.save_state(migration_id, state)
@@ -866,18 +870,13 @@ def create_app(
             raise HTTPException(
                 status_code=400, detail="Select an Actual budget first."
             )
-        category_ids = [
-            str(item.get("category_id"))
-            for item in state.get("note_patch_report") or []
-            if item.get("category_id") and item.get("patched")
-        ]
         gateway = backend_manager.gateway("actual")
         if not hasattr(gateway, "rollback_category_note_blocks"):
             raise HTTPException(
                 status_code=500, detail="Actual note rollback is not available."
             )
         state["note_rollback_report"] = gateway.rollback_category_note_blocks(
-            actual_budget_id, category_ids, marker=marker_for(migration_id)
+            actual_budget_id, state.get("note_patch_report") or []
         )
         workspace.save_state(migration_id, state)
         return _redirect(request, f"/migration/ynab-to-actual/{migration_id}/finish")
