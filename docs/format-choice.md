@@ -80,4 +80,4 @@ Observed traits:
 
 Prefer CAMT.053 XML when the bank offers it.
 
-Use the supported CSV format for the bank that only exposes CSV. It uses deterministic hash-based import IDs derived from the selected YNAB account, date, amount, payee, memo, and occurrence count. MT940 should only be added if a concrete need appears, because CAMT carries richer structured data for the same bank export workflow.
+Use the supported CSV format for the bank that only exposes CSV. It uses deterministic hash-based import IDs derived from the selected YNAB account, date, amount, stable raw CSV transaction fields, and occurrence count. The hash deliberately avoids display-derived payees and memos so rule changes and memo rendering changes do not alter duplicate detection. MT940 should only be added if a concrete need appears, because CAMT carries richer structured data for the same bank export workflow.

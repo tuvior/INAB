@@ -166,7 +166,7 @@ For real-server verification against a disposable Actual budget, see [docs/actua
 - YNAB amounts are converted to milliunits with `Decimal * 1000`; Actual Budget receives decimal amounts through actualpy.
 - Imported transactions are marked cleared where the backend supports it.
 - `AcctSvcrRef` becomes `INAB:<AcctSvcrRef>` when it fits YNAB's 36-character import ID limit.
-- Rows without a usable bank reference get a deterministic hash-based `INAB:<hash>` import ID.
+- Rows without a usable bank reference get a deterministic hash-based `INAB:<hash>` import ID. CSV hashes and CAMT missing-reference hashes are based on raw transaction identity fields rather than display payees or memos.
 - Before import, INAB fetches existing backend transactions for each mapped account and skips matching import IDs.
 - YNAB can match an INAB-imported row to a user-entered transaction on the same account with the same amount and a date within 10 days.
 - Actual Budget duplicate preview compares Actual `financial_id` / imported IDs against INAB import IDs.

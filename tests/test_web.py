@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from inab.config import Settings
 from inab.migration import MigrationWorkspace
-from inab.models import make_import_id
+from inab.models import make_legacy_display_import_id, make_source_ref_import_id
 from inab.store import Store
 from inab.web import _save_plan, create_app, format_money
 from inab.ynab_api import ExistingTransaction, YnabPlan
@@ -395,9 +395,8 @@ def test_upload_preview_marks_bank_date_card_fallback_import_id_as_duplicate(
         ynab_account_name="Checking",
         transfer_payee_id="tp-checking",
     )
-    old_import_id = make_import_id(
+    old_import_id = make_legacy_display_import_id(
         iban="CH111",
-        source_ref=None,
         booking_date=date(2026, 1, 19),
         amount=Decimal("-34.30"),
         payee="Sample Bistro",
@@ -975,13 +974,9 @@ def test_upload_preview_marks_legacy_split_import_id_as_duplicate(
     )
     uetr = "7f590b14-505f-4e16-8701-3fa01ee7a5a1"
     gateway.existing[("plan-1", "checking-id")] = {
-        make_import_id(
+        make_source_ref_import_id(
             iban="CH111",
             source_ref=uetr,
-            booking_date=date(2026, 4, 30),
-            amount=Decimal("-600"),
-            payee="Alex Example",
-            memo=None,
         )
     }
     entry = f"""

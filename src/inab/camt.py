@@ -18,7 +18,10 @@ from .models import (
     ParseResult,
     clean_source_ref,
     compact_whitespace,
-    make_import_id,
+    make_camt_missing_ref_import_id,
+    make_csv_missing_ref_import_id,
+    make_legacy_display_import_id,
+    make_source_ref_import_id,
     normalize_whitespace,
     payee_from_description,
     truncate,
@@ -50,6 +53,13 @@ CSV_REQUIRED_COLUMNS = {
     "Wise",
     "Spaces",
 }
+CSV_IDENTITY_COLUMNS = (
+    "Description",
+    "Subject",
+    "Original amount",
+    "Original currency",
+    "Exchange rate",
+)
 
 CARD_PURCHASE_PATTERN = re.compile(
     r"(?P<purchase_type>Achat online|Achat)\s+"
@@ -130,7 +140,9 @@ def parse_csv_export(
 
     statement_id = f"CSV:{Path(filename).stem}"
     transactions: list[BankTransaction] = []
-    occurrence_by_key: dict[tuple[str, str, str, str, str], int] = defaultdict(int)
+    occurrence_by_key: dict[tuple[str, str, str, tuple[str, ...]], int] = defaultdict(
+        int
+    )
     dates: list[date] = []
     for sequence, row in enumerate(raw_rows, start=1):
         booking_date = _parse_csv_date(row.get("Date"), sequence=sequence)
@@ -139,15 +151,19 @@ def parse_csv_export(
         description = normalize_whitespace(row.get("Description"))
         payee = payee_from_description(description)
         memo = _csv_memo(row)
-        key = (account_iban, booking_date.isoformat(), str(amount), payee, memo or "")
+        identity_fields = _csv_identity_fields(row)
+        key = (
+            account_iban,
+            booking_date.isoformat(),
+            str(amount),
+            tuple(identity_fields),
+        )
         occurrence_by_key[key] += 1
-        import_id = make_import_id(
-            iban=account_iban,
-            source_ref=None,
+        import_id = make_csv_missing_ref_import_id(
+            account_key=account_iban,
             booking_date=booking_date,
             amount=amount,
-            payee=payee,
-            memo=memo,
+            identity_fields=identity_fields,
             occurrence=occurrence_by_key[key],
         )
         transactions.append(
@@ -279,8 +295,15 @@ def _parse_statement(
             )
         )
 
-    occurrence_by_key: dict[tuple[str, str, str, str, str], int] = defaultdict(int)
-    bank_occurrence_by_key: dict[tuple[str, str, str, str, str], int] = defaultdict(int)
+    occurrence_by_key: dict[tuple[str, str, str, tuple[str, ...]], int] = defaultdict(
+        int
+    )
+    legacy_occurrence_by_key: dict[tuple[str, str, str, str, str], int] = defaultdict(
+        int
+    )
+    legacy_bank_occurrence_by_key: dict[tuple[str, str, str, str, str], int] = (
+        defaultdict(int)
+    )
     for item in pending:
         source_ref = item["source_ref"]
         amount = item["amount"]
@@ -294,6 +317,7 @@ def _parse_statement(
         legacy_exact_source_refs = item.get("legacy_exact_source_refs") or []
         legacy_booking_dates = item.get("legacy_booking_dates") or []
         bank_booking_date = item.get("bank_booking_date") or booking_date
+        identity_fields = item.get("identity_fields") or []
         assert isinstance(source_ref, str | None)
         assert isinstance(amount, Decimal)
         assert isinstance(booking_date, date)
@@ -306,51 +330,67 @@ def _parse_statement(
         assert isinstance(legacy_exact_source_refs, list)
         assert isinstance(legacy_booking_dates, list)
         assert isinstance(bank_booking_date, date)
-        key = (iban, booking_date.isoformat(), str(amount), payee, memo or "")
-        occurrence_by_key[key] += 1
-        bank_key = (iban, bank_booking_date.isoformat(), str(amount), payee, memo or "")
-        bank_occurrence_by_key[bank_key] += 1
-        import_id = make_import_id(
-            iban=iban,
-            source_ref=source_ref,
-            booking_date=booking_date,
-            amount=amount,
-            payee=payee,
-            memo=memo,
-            occurrence=occurrence_by_key[key],
+        assert isinstance(identity_fields, list)
+        key = (
+            iban,
+            booking_date.isoformat(),
+            str(amount),
+            tuple(str(field) for field in identity_fields),
         )
-        legacy_import_ids = [
-            make_import_id(
+        occurrence_by_key[key] += 1
+        legacy_key = (iban, booking_date.isoformat(), str(amount), payee, memo or "")
+        legacy_occurrence_by_key[legacy_key] += 1
+        bank_key = (iban, bank_booking_date.isoformat(), str(amount), payee, memo or "")
+        legacy_bank_occurrence_by_key[bank_key] += 1
+        if source_ref:
+            import_id = make_source_ref_import_id(
                 iban=iban,
-                source_ref=legacy_source_ref,
+                source_ref=source_ref,
+            )
+        else:
+            import_id = make_camt_missing_ref_import_id(
+                iban=iban,
                 booking_date=booking_date,
                 amount=amount,
-                payee=payee,
-                memo=memo,
+                identity_fields=[str(field) for field in identity_fields],
                 occurrence=occurrence_by_key[key],
+            )
+        legacy_import_ids = [
+            make_source_ref_import_id(
+                iban=iban,
+                source_ref=legacy_source_ref,
             )
             for legacy_source_ref in legacy_source_refs
             if isinstance(legacy_source_ref, str)
         ]
         if source_ref is None:
+            legacy_import_id = make_legacy_display_import_id(
+                iban=iban,
+                booking_date=booking_date,
+                amount=amount,
+                payee=payee,
+                memo=memo,
+                occurrence=legacy_occurrence_by_key[legacy_key],
+            )
+            if legacy_import_id != import_id:
+                legacy_import_ids.append(legacy_import_id)
             for legacy_booking_date in legacy_booking_dates:
                 if not isinstance(legacy_booking_date, date):
                     continue
-                legacy_key = (
+                legacy_bank_key = (
                     iban,
                     legacy_booking_date.isoformat(),
                     str(amount),
                     payee,
                     memo or "",
                 )
-                legacy_import_id = make_import_id(
+                legacy_import_id = make_legacy_display_import_id(
                     iban=iban,
-                    source_ref=None,
                     booking_date=legacy_booking_date,
                     amount=amount,
                     payee=payee,
                     memo=memo,
-                    occurrence=bank_occurrence_by_key[legacy_key],
+                    occurrence=legacy_bank_occurrence_by_key[legacy_bank_key],
                 )
                 if (
                     legacy_import_id != import_id
@@ -358,14 +398,9 @@ def _parse_statement(
                 ):
                     legacy_import_ids.append(legacy_import_id)
         legacy_exact_import_ids = [
-            make_import_id(
+            make_source_ref_import_id(
                 iban=iban,
                 source_ref=legacy_source_ref,
-                booking_date=booking_date,
-                amount=amount,
-                payee=payee,
-                memo=memo,
-                occurrence=occurrence_by_key[key],
             )
             for legacy_source_ref in legacy_exact_source_refs
             if isinstance(legacy_source_ref, str)
@@ -499,6 +534,13 @@ def _parse_entry_items(
             "counterparty_iban": counterparty["iban"],
             "counterparty_bank": counterparty["bank"],
             "legacy_booking_dates": legacy_booking_dates,
+            "identity_fields": _camt_entry_identity_fields(
+                bank_booking_date=booking_date,
+                value_date=bank_value_date,
+                bank_code=bank_code,
+                description=description,
+                counterparty=counterparty,
+            ),
         }
     ]
 
@@ -571,6 +613,15 @@ def _split_detail_items(
                 "counterparty_name": counterparty["name"],
                 "counterparty_iban": counterparty["iban"],
                 "counterparty_bank": counterparty["bank"],
+                "identity_fields": _camt_detail_identity_fields(
+                    entry_description=entry_description,
+                    detail=detail,
+                    detail_index=detail_index,
+                    booking_date=booking_date,
+                    value_date=value_date,
+                    bank_code=bank_code,
+                    counterparty=counterparty,
+                ),
             }
         )
     return items
@@ -676,6 +727,10 @@ def _csv_memo(row: dict[str, str | None]) -> str | None:
     return _memo_from_parts(parts)
 
 
+def _csv_identity_fields(row: dict[str, str | None]) -> list[str]:
+    return [normalize_whitespace(row.get(column)) for column in CSV_IDENTITY_COLUMNS]
+
+
 def _csv_optional_value(value: str | None) -> str:
     normalized = normalize_whitespace(value)
     if normalized.casefold() == "no":
@@ -736,6 +791,53 @@ def _counterparty_info(
         "iban": _iban_text(_first_text(detail, iban_paths)),
         "bank": _first_text(detail, bank_paths, normalize=True),
     }
+
+
+def _camt_entry_identity_fields(
+    *,
+    bank_booking_date: date,
+    value_date: date | None,
+    bank_code: str | None,
+    description: str,
+    counterparty: dict[str, str | None],
+) -> list[str]:
+    return [
+        f"bank_booking_date={bank_booking_date.isoformat()}",
+        f"value_date={value_date.isoformat() if value_date else ''}",
+        f"bank_code={compact_whitespace(bank_code)}",
+        f"description={normalize_whitespace(description)}",
+        f"counterparty_name={compact_whitespace(counterparty.get('name'))}",
+        f"counterparty_iban={_iban_text(counterparty.get('iban')) or ''}",
+        f"counterparty_bank={compact_whitespace(counterparty.get('bank'))}",
+    ]
+
+
+def _camt_detail_identity_fields(
+    *,
+    entry_description: str,
+    detail: ElementTree.Element,
+    detail_index: int,
+    booking_date: date,
+    value_date: date | None,
+    bank_code: str | None,
+    counterparty: dict[str, str | None],
+) -> list[str]:
+    unstructured_remittance = "\n".join(
+        element.text or "" for element in detail.findall("RmtInf/Ustrd")
+    )
+    structured_ref = _text(detail, "RmtInf/Strd/CdtrRefInf/Ref")
+    return [
+        f"detail_index={detail_index}",
+        f"bank_booking_date={booking_date.isoformat()}",
+        f"value_date={value_date.isoformat() if value_date else ''}",
+        f"bank_code={compact_whitespace(bank_code)}",
+        f"entry_description={normalize_whitespace(entry_description)}",
+        f"unstructured_remittance={normalize_whitespace(unstructured_remittance)}",
+        f"structured_ref={compact_whitespace(structured_ref)}",
+        f"counterparty_name={compact_whitespace(counterparty.get('name'))}",
+        f"counterparty_iban={_iban_text(counterparty.get('iban')) or ''}",
+        f"counterparty_bank={compact_whitespace(counterparty.get('bank'))}",
+    ]
 
 
 def _detail_source_ref(

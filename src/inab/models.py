@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -223,23 +224,23 @@ def clean_source_ref(value: str | None) -> str | None:
     return normalized
 
 
-def make_import_id(
+def make_source_ref_import_id(*, iban: str, source_ref: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9._-]", "", source_ref)
+    if token and len(f"INAB:{token}") <= 36:
+        return f"INAB:{token}"
+    digest = hashlib.sha1(f"{iban}|{source_ref}".encode("utf-8")).hexdigest()[:30]
+    return f"INAB:{digest}"
+
+
+def make_legacy_display_import_id(
     *,
     iban: str,
-    source_ref: str | None,
     booking_date: date,
     amount: Decimal,
     payee: str,
     memo: str | None,
     occurrence: int = 1,
 ) -> str:
-    if source_ref:
-        token = re.sub(r"[^A-Za-z0-9._-]", "", source_ref)
-        if token and len(f"INAB:{token}") <= 36:
-            return f"INAB:{token}"
-        digest = hashlib.sha1(f"{iban}|{source_ref}".encode("utf-8")).hexdigest()[:30]
-        return f"INAB:{digest}"
-
     fingerprint = "|".join(
         [
             iban,
@@ -249,6 +250,57 @@ def make_import_id(
             memo or "",
             str(occurrence),
         ]
+    )
+    digest = hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()[:30]
+    return f"INAB:{digest}"
+
+
+def make_csv_missing_ref_import_id(
+    *,
+    account_key: str,
+    booking_date: date,
+    amount: Decimal,
+    identity_fields: list[str],
+    occurrence: int = 1,
+) -> str:
+    return _json_import_id(
+        {
+            "format": "csv-v2",
+            "account_key": account_key,
+            "booking_date": booking_date.isoformat(),
+            "amount": str(amount),
+            "identity_fields": identity_fields,
+            "occurrence": occurrence,
+        }
+    )
+
+
+def make_camt_missing_ref_import_id(
+    *,
+    iban: str,
+    booking_date: date,
+    amount: Decimal,
+    identity_fields: list[str],
+    occurrence: int = 1,
+) -> str:
+    return _json_import_id(
+        {
+            "format": "camt-missing-ref-v2",
+            "iban": iban,
+            "booking_date": booking_date.isoformat(),
+            "amount": str(amount),
+            "identity_fields": identity_fields,
+            "occurrence": occurrence,
+        }
+    )
+
+
+def _json_import_id(payload: dict[str, Any]) -> str:
+    fingerprint = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
     )
     digest = hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()[:30]
     return f"INAB:{digest}"
