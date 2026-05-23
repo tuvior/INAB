@@ -41,9 +41,9 @@
               <td class="history-file" data-label="Import">
                 <span class="history-file-name" title="{{ job.filename }}">{{ job.filename }}</span>
                 <span class="muted block history-meta">
-                  Created {{ job.created_at[:16]|replace("T", " ") }}
+                  Created <time data-local-datetime datetime="{{ job.created_at }}">{{ job.created_at[:16]|replace("T", " ") }}</time>
                   {% if job.updated_at[:16] != job.created_at[:16] %}
-                    · Updated {{ job.updated_at[:16]|replace("T", " ") }}
+                    · Updated <time data-local-datetime datetime="{{ job.updated_at }}">{{ job.updated_at[:16]|replace("T", " ") }}</time>
                   {% endif %}
                 </span>
               </td>

@@ -1615,6 +1615,7 @@ def test_import_history_lists_jobs(
     assert page.status_code == 200
     assert "preview.xml" in page.text
     assert "imported.xml" in page.text
+    assert 'data-local-datetime datetime="' in page.text
     assert "imported" in page.text
     assert "3</strong> ready" in page.text
     assert "2</strong> saved IDs" in page.text

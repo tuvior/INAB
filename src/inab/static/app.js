@@ -8,6 +8,26 @@ const previewButton = document.getElementById("preview-button");
 const selfNameList = document.getElementById("self-name-list");
 const addSelfNameButton = document.querySelector("[data-add-self-name]");
 const scrollRestoreKey = `inab:scroll:${window.location.pathname}${window.location.search}`;
+const localDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+document.querySelectorAll("time[data-local-datetime]").forEach((element) => {
+  const dateTime = element.getAttribute("datetime");
+  if (!dateTime) {
+    return;
+  }
+  const date = new Date(dateTime);
+  if (Number.isNaN(date.getTime())) {
+    return;
+  }
+  element.textContent = localDateTimeFormatter.format(date);
+  element.title = dateTime;
+});
 
 try {
   const savedScroll = sessionStorage.getItem(scrollRestoreKey);
