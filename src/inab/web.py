@@ -36,12 +36,14 @@ from .migration import (
     analyze_targets,
     build_note_patches,
     default_decisions,
+    enrich_export_with_flag_details,
     export_counts,
     markdown_report,
     match_accounts,
     match_categories,
     migrate_local_state,
     source_category_map,
+    ynab_flag_tags,
 )
 from .rules import RuleError, apply_rules, evaluate_transaction, validate_rule_input
 from .store import AccountMapping, Store
@@ -609,6 +611,9 @@ def create_app(
         if not hasattr(gateway, "export_budget_json"):
             raise HTTPException(status_code=500, detail="YNAB export is not available.")
         export = gateway.export_budget_json(source_budget_id)
+        flag_details = {}
+        if hasattr(gateway, "transaction_flag_details"):
+            flag_details = gateway.transaction_flag_details(source_budget_id)
         workspace = MigrationWorkspace(base_settings.data_dir)
         migration_id = workspace.create(
             source_budget_id=source_budget_id, source_budget_name=selected.name
@@ -622,6 +627,7 @@ def create_app(
                 "export_counts": export_counts(export),
                 "target_items": items,
                 "decisions": default_decisions(items),
+                "flag_details": flag_details,
             }
         )
         workspace.save_state(migration_id, state)
@@ -727,7 +733,8 @@ def create_app(
             raise HTTPException(
                 status_code=400, detail="Select the imported Actual budget."
             )
-        budgets = backend_manager.gateway("actual").list_budgets()
+        actual_gateway = backend_manager.gateway("actual")
+        budgets = actual_gateway.list_budgets()
         selected = next(
             (budget for budget in budgets if str(budget.id) == actual_budget_id), None
         )
@@ -737,6 +744,14 @@ def create_app(
             )
         state["actual_budget_id"] = str(selected.id)
         state["actual_budget_name"] = selected.name
+        flag_export = enrich_export_with_flag_details(
+            workspace.export(migration_id), state.get("flag_details") or {}
+        )
+        flag_tags = ynab_flag_tags(flag_export)
+        if hasattr(actual_gateway, "migrate_ynab_flag_tags"):
+            state["flag_tag_report"] = actual_gateway.migrate_ynab_flag_tags(
+                str(selected.id), flag_tags
+            )
         state["step"] = "actual_selected"
         workspace.save_state(migration_id, state)
         return _redirect(request, f"/migration/ynab-to-actual/{migration_id}/match")

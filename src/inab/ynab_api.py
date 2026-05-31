@@ -65,6 +65,30 @@ class OfficialYnabGateway:
         except Exception as exc:
             raise YnabError("Could not parse exported YNAB budget JSON.") from exc
 
+    def transaction_flag_details(
+        self, budget_id: str
+    ) -> dict[str, dict[str, str | None]]:
+        ynab = _ynab()
+        try:
+            with ynab.ApiClient(
+                ynab.Configuration(access_token=self.access_token)
+            ) as api_client:
+                response = ynab.TransactionsApi(api_client).get_transactions(budget_id)
+        except Exception as exc:
+            raise YnabError(
+                _safe_error("Could not fetch YNAB transaction flag names", exc)
+            ) from exc
+        result: dict[str, dict[str, str | None]] = {}
+        for transaction in response.data.transactions:
+            flag_color = _enum_value(getattr(transaction, "flag_color", None))
+            flag_name = getattr(transaction, "flag_name", None)
+            if flag_color or flag_name:
+                result[str(transaction.id)] = {
+                    "flag_color": _optional_str(flag_color),
+                    "flag_name": _optional_str(flag_name),
+                }
+        return result
+
     def list_plans(self) -> list[YnabPlan]:
         ynab = _ynab()
         try:
@@ -261,6 +285,10 @@ def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _enum_value(value: Any) -> Any:
+    return getattr(value, "value", value)
 
 
 def _transaction_date(value: Any) -> date | None:

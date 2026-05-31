@@ -39,7 +39,20 @@ class FakeSession:
     def __init__(self) -> None:
         self.closed = False
         self.categories = {"cat-food": SimpleNamespace(id="cat-food", tombstone=0)}
-        self.transactions = {"tx-1": SimpleNamespace(id="tx-1", tombstone=0)}
+        self.transactions = {
+            "tx-1": SimpleNamespace(id="tx-1", tombstone=0, notes="Dinner #green"),
+            "tx-2": SimpleNamespace(id="tx-2", tombstone=0, notes="#green"),
+        }
+        self.tags = [
+            SimpleNamespace(
+                id="tag-green",
+                tag="Paid for others",
+                color="#34c759",
+                description="Imported from YNAB",
+                tombstone=0,
+            )
+        ]
+        self.added: list[Any] = []
 
     def get(self, model: Any, item_id: str) -> Any:
         if model is FakeCategories:
@@ -47,6 +60,9 @@ class FakeSession:
         if model is FakeTransactions:
             return self.transactions.get(item_id)
         return None
+
+    def add(self, item: Any) -> None:
+        self.added.append(item)
 
 
 class FakeCategories:
@@ -57,9 +73,14 @@ class FakeTransactions:
     pass
 
 
+class FakeTags:
+    pass
+
+
 class FakeDatabase:
     Categories = FakeCategories
     Transactions = FakeTransactions
+    Tags = FakeTags
 
 
 class FakeTransaction:
@@ -102,6 +123,29 @@ class FakeQueries:
             )
         ]
 
+    def get_tags(
+        self, session: FakeSession, *, include_deleted: bool = False
+    ) -> list[SimpleNamespace]:
+        return session.tags
+
+    def create_tag(
+        self,
+        session: FakeSession,
+        name: str,
+        description: str | None = None,
+        color: str = "#690CB0",
+    ) -> SimpleNamespace:
+        tag = SimpleNamespace(
+            id=f"tag-{name}",
+            tag=name,
+            description=description,
+            color=color,
+            tombstone=0,
+        )
+        session.tags.append(tag)
+        session.add(tag)
+        return tag
+
     def get_categories(
         self, session: FakeSession, *, include_deleted: bool = False
     ) -> list["FakeCategory"]:
@@ -121,11 +165,21 @@ class FakeQueries:
 
     def get_transactions(
         self,
-        session: Any,
+        session: FakeSession,
         *,
         start_date: date | None = None,
         account: str | None = None,
+        notes: str | None = None,
+        is_parent: bool = False,
     ) -> list[FakeTransaction]:
+        if notes is not None:
+            return [
+                transaction
+                for transaction in session.transactions.values()
+                if notes.lower() in str(getattr(transaction, "notes", "") or "").lower()
+            ]
+        if start_date is None and account is None:
+            return list(session.transactions.values())
         self.existing_call = {"start_date": start_date, "account": account}
         return self.existing
 
@@ -268,6 +322,32 @@ def test_actual_gateway_reconciles_normal_transactions_and_commits(
     assert FakeActual.instances[-1].committed is True
 
 
+def test_actual_gateway_rewrites_ynab_flag_name_phrase_to_kebab_tag(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    queries = FakeQueries()
+    monkeypatch.setattr("inab.actual_api._queries", lambda: queries)
+    gateway = _gateway(tmp_path)
+
+    report = gateway.migrate_ynab_flag_tags(
+        "budget-id",
+        [
+            {
+                "color": "yellow",
+                "name": "Other currency",
+                "tag": "other-currency",
+                "color_hex": "#ffcc00",
+                "description": "Imported from YNAB flag Yellow: Other currency",
+                "transaction_count": 1,
+            }
+        ],
+    )
+
+    session = FakeActual.instances[-1].session
+    session.transactions["tx-1"].notes = "#Other currency"
+    assert report[0]["transactions_missing"] == 1
+
+
 def test_actual_gateway_creates_transfer_and_sets_both_import_ids(
     monkeypatch: Any, tmp_path: Path
 ) -> None:
@@ -349,6 +429,41 @@ def test_actual_gateway_patches_and_rolls_back_category_notes(
 
     assert rollback[0]["rolled_back"] is True
     assert category.notes == "Existing note"
+    assert FakeActual.instances[-1].committed is True
+
+
+def test_actual_gateway_migrates_ynab_flags_to_named_tags(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    queries = FakeQueries()
+    monkeypatch.setattr("inab.actual_api._queries", lambda: queries)
+    monkeypatch.setattr("inab.actual_api._database", lambda: FakeDatabase)
+    gateway = _gateway(tmp_path)
+
+    report = gateway.migrate_ynab_flag_tags(
+        "budget-id",
+        [
+            {
+                "color": "green",
+                "name": "Paid for others",
+                "tag": "paid-for-others",
+                "color_hex": "#34c759",
+                "description": "Imported from YNAB flag Green: Paid for others",
+                "transaction_ids": ["tx-1", "tx-2", "tx-missing"],
+                "transaction_count": 2,
+            }
+        ],
+    )
+
+    session = FakeActual.instances[-1].session
+    assert session.tags[0].tag == "paid-for-others"
+    assert (
+        session.tags[0].description == "Imported from YNAB flag Green: Paid for others"
+    )
+    assert session.transactions["tx-1"].notes == "Dinner #paid-for-others"
+    assert session.transactions["tx-2"].notes == "#paid-for-others"
+    assert report[0]["transactions_updated"] == 2
+    assert report[0]["transactions_missing"] == 0
     assert FakeActual.instances[-1].committed is True
 
 

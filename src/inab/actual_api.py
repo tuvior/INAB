@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+import re
 from typing import Any, Iterator
 
 from .budget_api import (
@@ -325,6 +326,60 @@ class ActualBudgetGateway:
             ) from exc
         return report
 
+    def migrate_ynab_flag_tags(
+        self, budget_id: str, flags: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        report: list[dict[str, Any]] = []
+        if not flags:
+            return report
+        try:
+            with self._actual(file=budget_id) as actual:
+                queries = _queries()
+                transactions = _all_transactions(actual.session, queries)
+                tags_by_name = {
+                    str(tag.tag): tag
+                    for tag in queries.get_tags(actual.session, include_deleted=True)
+                    if getattr(tag, "tag", None)
+                }
+                for flag in flags:
+                    color = str(flag.get("color") or "").strip().lower()
+                    target_name = str(flag.get("tag") or "").strip().lstrip("#")
+                    if not color or not target_name:
+                        continue
+                    tag = _upsert_flag_tag(
+                        actual.session,
+                        queries,
+                        tags_by_name,
+                        color=color,
+                        source_name=str(flag.get("name") or ""),
+                        target_name=target_name,
+                        color_hex=str(flag.get("color_hex") or "#690cb0"),
+                        description=str(
+                            flag.get("description") or "Imported from YNAB"
+                        ),
+                    )
+                    transaction_result = _assign_flag_tag_to_transactions(
+                        transactions,
+                        expected_count=int(flag.get("transaction_count") or 0),
+                        source_tag=color,
+                        target_tag=target_name,
+                    )
+                    report.append(
+                        {
+                            "color": color,
+                            "name": flag.get("name"),
+                            "tag": target_name,
+                            "tag_id": _optional_str(getattr(tag, "id", None)),
+                            **transaction_result,
+                        }
+                    )
+                actual.commit()
+        except Exception as exc:
+            raise ActualBudgetError(
+                _safe_error("Could not migrate Actual Budget YNAB flag tags", exc)
+            ) from exc
+        return report
+
     @contextmanager
     def _actual(self, *, file: str | None) -> Iterator[Any]:
         actual_cls = self._actual_cls or _actual_cls()
@@ -450,6 +505,148 @@ def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _upsert_flag_tag(
+    session: Any,
+    queries: Any,
+    tags_by_name: dict[str, Any],
+    *,
+    color: str,
+    source_name: str,
+    target_name: str,
+    color_hex: str,
+    description: str,
+) -> Any:
+    source_tag = _source_flag_tag(tags_by_name, color=color, source_name=source_name)
+    target_tag = tags_by_name.get(target_name)
+    if (
+        source_tag is not None
+        and target_tag is None
+        and _looks_like_ynab_imported_tag(source_tag)
+    ):
+        _remove_tag_lookup(tags_by_name, source_tag)
+        source_tag.tag = target_name
+        source_tag.color = color_hex
+        source_tag.description = description
+        source_tag.tombstone = 0
+        tags_by_name[target_name] = source_tag
+        return source_tag
+    if target_tag is None:
+        target_tag = queries.create_tag(
+            session, target_name, description=description, color=color_hex
+        )
+        tags_by_name[target_name] = target_tag
+    else:
+        target_tag.color = color_hex
+        target_tag.description = description
+        target_tag.tombstone = 0
+    if (
+        source_tag is not None
+        and source_tag is not target_tag
+        and _looks_like_ynab_imported_tag(source_tag)
+    ):
+        source_tag.tombstone = 1
+    return target_tag
+
+
+def _source_flag_tag(
+    tags_by_name: dict[str, Any], *, color: str, source_name: str
+) -> Any | None:
+    candidates = [source_name.strip(), color]
+    tags_by_key = {key.lower(): value for key, value in tags_by_name.items()}
+    for candidate in candidates:
+        if not candidate:
+            continue
+        tag = tags_by_key.get(candidate.lower())
+        if tag is not None and _looks_like_ynab_imported_tag(tag):
+            return tag
+    return None
+
+
+def _remove_tag_lookup(tags_by_name: dict[str, Any], tag: Any) -> None:
+    tag_name = str(getattr(tag, "tag", "") or "")
+    for key in list(tags_by_name):
+        if key.lower() == tag_name.lower():
+            tags_by_name.pop(key, None)
+
+
+def _looks_like_ynab_imported_tag(tag: Any) -> bool:
+    description = str(getattr(tag, "description", "") or "").strip().lower()
+    return description == "imported from ynab"
+
+
+def _assign_flag_tag_to_transactions(
+    transactions: list[Any],
+    *,
+    expected_count: int,
+    source_tag: str,
+    target_tag: str,
+) -> dict[str, int]:
+    updated = 0
+    unchanged = 0
+    matched = 0
+    for transaction in transactions:
+        if _deleted(transaction):
+            continue
+        existing = getattr(transaction, "notes", None)
+        notes = "" if existing is None else str(existing)
+        migrated = _replace_flag_marker(
+            notes, source_tag=source_tag, target_tag=target_tag
+        )
+        if migrated == notes and not _has_note_tag(notes, target_tag):
+            continue
+        matched += 1
+        if migrated == notes:
+            unchanged += 1
+            continue
+        transaction.notes = migrated
+        updated += 1
+    total = max(expected_count, matched)
+    return {
+        "transactions": total,
+        "transactions_updated": updated,
+        "transactions_missing": max(expected_count - matched, 0),
+        "transactions_unchanged": unchanged,
+    }
+
+
+def _all_transactions(session: Any, queries: Any) -> list[Any]:
+    by_id: dict[str, Any] = {}
+    for is_parent in (False, True):
+        for transaction in queries.get_transactions(session, is_parent=is_parent):
+            by_id[str(getattr(transaction, "id", len(by_id)))] = transaction
+    return list(by_id.values())
+
+
+def _replace_flag_marker(notes: str, *, source_tag: str, target_tag: str) -> str:
+    target_marker = f"#{target_tag}"
+    if _has_note_tag(notes, target_tag):
+        updated = _remove_flag_marker(notes, source_tag)
+        return updated if updated != notes else notes
+    return _flag_marker_pattern(source_tag).sub(target_marker, notes)
+
+
+def _remove_flag_marker(notes: str, source_tag: str) -> str:
+    updated = _flag_marker_pattern(source_tag).sub("", notes)
+    return re.sub(r"[ \t]{2,}", " ", updated).strip()
+
+
+def _flag_marker_pattern(source: str) -> re.Pattern[str]:
+    escaped = re.escape(source.strip())
+    return re.compile(
+        rf"(?<![A-Za-z0-9_#])#{escaped}(?![A-Za-z0-9_-])",
+        flags=re.IGNORECASE,
+    )
+
+
+def _has_note_tag(notes: str, tag: str) -> bool:
+    return _note_tag_pattern(tag).search(notes) is not None
+
+
+def _note_tag_pattern(tag: str) -> re.Pattern[str]:
+    escaped = re.escape(tag.lstrip("#"))
+    return re.compile(rf"(?<![A-Za-z0-9_#])#{escaped}(?![A-Za-z0-9_])")
 
 
 def _append_note_block(existing: str, block: str) -> str:

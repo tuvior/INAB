@@ -193,6 +193,8 @@ class FakeGateway:
         self.returned_transactions: list[dict[str, Any]] = []
         self.deleted: list[tuple[str, str]] = []
         self.delete_errors: dict[str, str] = {}
+        self.migrated_flag_tags: list[dict[str, Any]] = []
+        self.transaction_flag_details_by_id: dict[str, dict[str, str | None]] = {}
         self.export_payload: dict[str, Any] = {
             "data": {
                 "budget": {
@@ -213,6 +215,11 @@ class FakeGateway:
 
     def export_budget_json(self, budget_id: str) -> dict[str, Any]:
         return self.export_payload
+
+    def transaction_flag_details(
+        self, budget_id: str
+    ) -> dict[str, dict[str, str | None]]:
+        return self.transaction_flag_details_by_id
 
     def list_accounts(self, plan_id: str) -> list[BudgetAccount]:
         return self.accounts
@@ -256,6 +263,23 @@ class FakeGateway:
 
             raise YnabError(self.delete_errors[transaction_id])
         self.deleted.append((plan_id, transaction_id))
+
+    def migrate_ynab_flag_tags(
+        self, budget_id: str, flags: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        self.migrated_flag_tags = flags
+        return [
+            {
+                "color": flag["color"],
+                "name": flag["name"],
+                "tag": flag["tag"],
+                "transactions": flag["transaction_count"],
+                "transactions_updated": flag["transaction_count"],
+                "transactions_missing": 0,
+                "transactions_unchanged": 0,
+            }
+            for flag in flags
+        ]
 
 
 @pytest.fixture

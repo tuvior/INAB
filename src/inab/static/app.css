@@ -226,6 +226,10 @@ label span {
   margin-bottom: 20px;
 }
 
+.migration-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .setup-section {
   display: grid;
   gap: 14px;

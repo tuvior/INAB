@@ -15,7 +15,7 @@
   </div>
 </section>
 
-<section class="status-grid">
+<section class="status-grid migration-summary-grid">
   <div class="panel">
     <h2>Targets</h2>
     <p class="metric">{{ migration.target_items|length }}</p>
@@ -29,6 +29,11 @@
   <div class="panel">
     <h2>Local state</h2>
     <p class="status {% if migration.state_migration_report %}ok{% else %}bad{% endif %}">{% if migration.state_migration_report %}Copied{% else %}Not copied{% endif %}</p>
+  </div>
+  <div class="panel">
+    <h2>Flags</h2>
+    <p class="metric">{{ migration.flag_tag_report|default([], true)|length }}</p>
+    <p class="muted">YNAB flag tags migrated</p>
   </div>
 </section>
 
@@ -71,6 +76,27 @@
             <td>{{ row.category_name or row.category_id }}</td>
             <td>{% if row.patched %}patched{% else %}skipped{% endif %}</td>
             <td>{{ row.error or "" }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if migration.flag_tag_report %}
+<section class="panel">
+  <h2>Flag tag report</h2>
+  <div class="table-wrap mobile-card-wrap">
+    <table class="mobile-card-table">
+      <thead><tr><th>Flag</th><th>Tag</th><th>Transactions</th><th>Missing</th></tr></thead>
+      <tbody>
+        {% for row in migration.flag_tag_report %}
+          <tr>
+            <td>{{ row.name or row.color }}</td>
+            <td>#{{ row.tag }}</td>
+            <td>{{ row.transactions_updated }} / {{ row.transactions }}</td>
+            <td>{{ row.transactions_missing }}</td>
           </tr>
         {% endfor %}
       </tbody>

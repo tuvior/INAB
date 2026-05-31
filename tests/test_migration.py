@@ -6,10 +6,12 @@ from inab.migration import (
     analyze_targets,
     build_note_patches,
     default_decisions,
+    enrich_export_with_flag_details,
     match_accounts,
     match_categories,
     migrate_local_state,
     source_category_map,
+    ynab_flag_tags,
 )
 from inab.store import Store
 
@@ -102,9 +104,7 @@ def test_analyze_targets_groups_template_confidence() -> None:
     assert by_id["cat-buffer"]["line"] == "#goal 1000.00"
     assert by_id["cat-holiday"]["line"] == "#template 1200.00 by 2026-12"
     assert by_id["cat-holiday"]["confidence"] == "exact"
-    assert by_id["cat-gym"]["line"] == (
-        "#template 588.00 by 2026-06 repeat every year"
-    )
+    assert by_id["cat-gym"]["line"] == ("#template 588.00 by 2026-06 repeat every year")
     assert by_id["cat-gym"]["confidence"] == "exact"
     assert by_id["cat-club"]["line"] == (
         "#template 264.00 repeat every 2 months starting 2026-05-15 up to 264.00"
@@ -166,6 +166,67 @@ def test_normalizes_generated_client_plan_export_for_actual_import(tmp_path) -> 
     assert "plan" not in export["data"]
     assert export["data"]["budget"]["accounts"][0]["id"] == "account-1"
     assert export["data"]["server_knowledge"] == 123
+
+
+def test_enrich_export_with_flag_details_adds_api_flag_names() -> None:
+    export = {
+        "data": {
+            "plan": {
+                "transactions": [
+                    {"id": "tx-1", "flag_color": "green", "flag_name": None},
+                    {"id": "tx-2", "flag_color": None},
+                ]
+            }
+        }
+    }
+
+    enriched = enrich_export_with_flag_details(
+        export,
+        {
+            "tx-1": {"flag_color": "green", "flag_name": "Paid for others"},
+            "tx-2": {"flag_color": "purple", "flag_name": "Shared"},
+        },
+    )
+
+    transactions = enriched["data"]["plan"]["transactions"]
+    assert transactions[0]["flag_name"] == "Paid for others"
+    assert transactions[1]["flag_color"] == "purple"
+    assert transactions[1]["flag_name"] == "Shared"
+
+
+def test_ynab_flag_tags_use_custom_names_as_kebab_case_tags() -> None:
+    export = {
+        "data": {
+            "budget": {
+                "transactions": [
+                    {
+                        "id": "tx-1",
+                        "flag_color": "yellow",
+                        "flag_name": "Other currency",
+                    },
+                    {
+                        "id": "tx-2",
+                        "flag_color": "green",
+                        "flag_name": "Paid for others",
+                    },
+                    {
+                        "id": "tx-3",
+                        "flag_color": "yellow",
+                        "flag_name": "Other currency",
+                    },
+                ]
+            }
+        }
+    }
+
+    flags = ynab_flag_tags(export)
+
+    assert flags[0]["color"] == "yellow"
+    assert flags[0]["name"] == "Other currency"
+    assert flags[0]["tag"] == "other-currency"
+    assert flags[0]["transaction_ids"] == ["tx-1", "tx-3"]
+    assert flags[1]["color"] == "green"
+    assert flags[1]["tag"] == "paid-for-others"
 
 
 def test_match_and_migrate_local_state_skips_history_and_unmatched_rules(

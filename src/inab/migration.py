@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
+from unicodedata import normalize
 
 from .budget_api import BudgetAccount, BudgetCategory
 from .store import Store
@@ -98,6 +99,24 @@ def normalize_ynab_export_for_actual(export: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def enrich_export_with_flag_details(
+    export: dict[str, Any], flag_details: dict[str, dict[str, str | None]]
+) -> dict[str, Any]:
+    if not flag_details:
+        return export
+    budget = budget_from_export(export)
+    for transaction in _list_value(budget, "transactions"):
+        transaction_id = str(transaction.get("id") or "")
+        details = flag_details.get(transaction_id) or {}
+        flag_name = str(details.get("flag_name") or "").strip()
+        if flag_name and not transaction.get("flag_name"):
+            transaction["flag_name"] = flag_name
+        flag_color = str(details.get("flag_color") or "").strip()
+        if flag_color and not transaction.get("flag_color"):
+            transaction["flag_color"] = flag_color
+    return export
+
+
 def export_counts(export: dict[str, Any]) -> dict[str, int]:
     budget = budget_from_export(export)
     categories = category_sources(export)
@@ -108,7 +127,50 @@ def export_counts(export: dict[str, Any]) -> dict[str, int]:
         "payees": len(_list_value(budget, "payees")),
         "transactions": len(_list_value(budget, "transactions")),
         "targets": len(targets),
+        "flags": len(ynab_flag_tags(export)),
     }
+
+
+def ynab_flag_tags(export: dict[str, Any]) -> list[dict[str, Any]]:
+    budget = budget_from_export(export)
+    by_color: dict[str, dict[str, Any]] = {}
+    for transaction in _list_value(budget, "transactions"):
+        if bool(transaction.get("deleted")):
+            continue
+        color = str(transaction.get("flag_color") or "").strip().lower()
+        if not color:
+            continue
+        item = by_color.setdefault(
+            color,
+            {
+                "color": color,
+                "name": _default_flag_name(color),
+                "tag": _kebab_tag(_default_flag_name(color), fallback=color),
+                "color_hex": _flag_color_hex(color),
+                "transaction_ids": [],
+                "names": {},
+            },
+        )
+        explicit_name = str(transaction.get("flag_name") or "").strip()
+        if explicit_name:
+            names = item["names"]
+            names[explicit_name] = names.get(explicit_name, 0) + 1
+        transaction_id = str(transaction.get("id") or "").strip()
+        if transaction_id:
+            item["transaction_ids"].append(transaction_id)
+    result: list[dict[str, Any]] = []
+    for item in by_color.values():
+        names = item.pop("names")
+        if names:
+            name = sorted(names.items(), key=lambda value: (-value[1], value[0]))[0][0]
+            item["name"] = name
+            item["tag"] = _kebab_tag(name, fallback=item["color"])
+        item["transaction_count"] = len(item["transaction_ids"])
+        item["description"] = (
+            f"Imported from YNAB flag {item['color'].title()}: {item['name']}"
+        )
+        result.append(item)
+    return sorted(result, key=lambda item: _flag_order(str(item["color"])))
 
 
 def category_sources(export: dict[str, Any]) -> list[dict[str, Any]]:
@@ -621,6 +683,45 @@ def _int_value(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _default_flag_name(color: str) -> str:
+    return color.replace("_", " ").title()
+
+
+def _kebab_tag(value: str, *, fallback: str) -> str:
+    normalized = normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "-", normalized).strip("-").lower()
+    if not normalized:
+        normalized = re.sub(r"[^a-zA-Z0-9]+", "-", fallback).strip("-").lower()
+    if not normalized:
+        normalized = "flag"
+    if normalized[0].isdigit():
+        normalized = f"flag-{normalized}"
+    return normalized
+
+
+def _flag_color_hex(color: str) -> str:
+    return {
+        "red": "#ff3b30",
+        "orange": "#ff9500",
+        "yellow": "#ffcc00",
+        "green": "#34c759",
+        "blue": "#5ac8fa",
+        "purple": "#af52de",
+    }.get(color, "#690cb0")
+
+
+def _flag_order(color: str) -> tuple[int, str]:
+    order = {
+        "red": 0,
+        "orange": 1,
+        "yellow": 2,
+        "green": 3,
+        "blue": 4,
+        "purple": 5,
+    }
+    return (order.get(color, 99), color)
 
 
 def _latest_month(budget: dict[str, Any]) -> dict[str, Any]:

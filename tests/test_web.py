@@ -48,7 +48,7 @@ def test_migration_wizard_generates_ynab_export(
             "plan": {
                 "accounts": [{"id": "account-1"}],
                 "payees": [{"id": "payee-1"}],
-                "transactions": [{"id": "tx-1"}],
+                "transactions": [{"id": "tx-1", "flag_color": "green"}],
                 "category_groups": [{"id": "group-1", "name": "Everyday"}],
                 "months": [
                     {
@@ -66,6 +66,9 @@ def test_migration_wizard_generates_ynab_export(
                 ],
             }
         }
+    }
+    gateway.transaction_flag_details_by_id = {
+        "tx-1": {"flag_color": "green", "flag_name": "Paid for others"}
     }
 
     start = client.post(
@@ -90,6 +93,7 @@ def test_migration_wizard_generates_ynab_export(
     assert download.status_code == 200
     assert "plan" not in download.json()["data"]
     assert download.json()["data"]["budget"]["accounts"][0]["id"] == "account-1"
+    assert "flag_name" not in download.json()["data"]["budget"]["transactions"][0]
 
 
 def test_migration_finish_exposes_explicit_write_actions(
@@ -164,6 +168,49 @@ def test_migration_actual_import_step_precedes_budget_selection(
     select_step = client.get(confirmed.headers["location"])
     assert "Select the imported budget" in select_step.text
     assert "Continue with this budget" in select_step.text
+
+
+def test_migration_actual_selection_runs_flag_tag_cleanup(
+    app_client: tuple[TestClient, Store, FakeGateway],
+) -> None:
+    client, store, gateway = app_client
+    login(client)
+    data_dir = store.database_path.parents[1]
+    workspace = MigrationWorkspace(data_dir)
+    migration_id = workspace.create(
+        source_budget_id="plan-1", source_budget_name="Household"
+    )
+    state = workspace.state(migration_id)
+    state["actual_import_confirmed"] = True
+    state["flag_details"] = {"tx-1": {"flag_color": "purple", "flag_name": "Shared"}}
+    workspace.save_state(migration_id, state)
+    workspace.save_export(
+        migration_id,
+        {
+            "data": {
+                "budget": {
+                    "transactions": [
+                        {
+                            "id": "tx-1",
+                            "flag_color": "purple",
+                            "flag_name": "Shared",
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    response = client.post(
+        f"/migration/ynab-to-actual/{migration_id}/actual",
+        data={"actual_budget_id": "plan-1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert gateway.migrated_flag_tags[0]["tag"] == "shared"
+    state = workspace.state(migration_id)
+    assert state["flag_tag_report"][0]["tag"] == "shared"
 
 
 def test_import_history_requires_auth(
