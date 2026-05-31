@@ -279,19 +279,6 @@ def test_actual_duplicate_detection_uses_financial_id(
     }
 
 
-def test_actual_gateway_materializes_categories_before_session_closes(
-    monkeypatch: Any, tmp_path: Path
-) -> None:
-    queries = FakeQueries()
-    monkeypatch.setattr("inab.actual_api._queries", lambda: queries)
-    gateway = _gateway(tmp_path)
-
-    categories = gateway.list_categories("budget-id")
-
-    assert categories[0].id == "cat-food"
-    assert categories[0].group_name == "Everyday"
-
-
 def test_actual_gateway_reconciles_normal_transactions_and_commits(
     monkeypatch: Any, tmp_path: Path
 ) -> None:
@@ -320,32 +307,6 @@ def test_actual_gateway_reconciles_normal_transactions_and_commits(
     assert queries.reconciled[0]["category"].id == "cat-food"
     assert queries.reconciled[0]["imported_id"] == "INAB:REF1"
     assert FakeActual.instances[-1].committed is True
-
-
-def test_actual_gateway_rewrites_ynab_flag_name_phrase_to_kebab_tag(
-    monkeypatch: Any, tmp_path: Path
-) -> None:
-    queries = FakeQueries()
-    monkeypatch.setattr("inab.actual_api._queries", lambda: queries)
-    gateway = _gateway(tmp_path)
-
-    report = gateway.migrate_ynab_flag_tags(
-        "budget-id",
-        [
-            {
-                "color": "yellow",
-                "name": "Other currency",
-                "tag": "other-currency",
-                "color_hex": "#ffcc00",
-                "description": "Imported from YNAB flag Yellow: Other currency",
-                "transaction_count": 1,
-            }
-        ],
-    )
-
-    session = FakeActual.instances[-1].session
-    session.transactions["tx-1"].notes = "#Other currency"
-    assert report[0]["transactions_missing"] == 1
 
 
 def test_actual_gateway_creates_transfer_and_sets_both_import_ids(

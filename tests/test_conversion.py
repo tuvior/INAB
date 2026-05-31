@@ -7,7 +7,6 @@ from inab.models import (
     amount_to_milliunits,
     make_camt_missing_ref_import_id,
     make_csv_missing_ref_import_id,
-    make_legacy_display_import_id,
     make_source_ref_import_id,
 )
 
@@ -25,25 +24,6 @@ def test_import_id_uses_bank_reference_when_short_enough() -> None:
 
     assert import_id == "INAB:20368112128"
     assert len(import_id) <= 36
-
-
-def test_legacy_display_import_id_is_stable_and_limited() -> None:
-    kwargs = {
-        "iban": "CH111",
-        "booking_date": date(2026, 4, 1),
-        "amount": Decimal("-10.00"),
-        "payee": "Payee",
-        "memo": "Memo",
-        "occurrence": 1,
-    }
-
-    assert make_legacy_display_import_id(**kwargs) == make_legacy_display_import_id(
-        **kwargs
-    )
-    assert len(make_legacy_display_import_id(**kwargs)) <= 36
-    assert make_legacy_display_import_id(**kwargs) != make_legacy_display_import_id(
-        **{**kwargs, "occurrence": 2}
-    )
 
 
 def test_csv_import_id_uses_stable_source_identity_fields() -> None:

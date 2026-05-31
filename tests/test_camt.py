@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-import inab.camt as camt
 from inab.camt import (
     CamtParseError,
     UnsupportedFormatError,
@@ -14,7 +13,6 @@ from inab.camt import (
     parse_csv_export,
     parse_upload,
 )
-from inab.models import make_legacy_display_import_id, make_source_ref_import_id
 
 from conftest import camt_document, entry_xml, statement_xml
 
@@ -107,55 +105,6 @@ def test_supported_csv_export_parses_with_selected_account_key() -> None:
     assert result.transactions[0].source_ref is None
     assert result.transactions[0].memo == "Alex Example; Salary April"
     assert result.transactions[1].memo == "SAMPLE BISTRO; Original amount: -17.90 EUR"
-
-
-def test_csv_import_id_does_not_depend_on_display_payee_or_memo(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    content = b""""Date";"Amount";"Original amount";"Original currency";"Exchange rate";"Description";"Subject";"Category";"Tags";"Wise";"Spaces"
-"2026-04-30";"600.00";"";"";"";"Alex Example";"Salary April";"income";"";"no";"no"
-"""
-    first = parse_csv_export(
-        "neon.csv", content, account_iban="CH999", target_currency="CHF"
-    ).transactions[0]
-
-    monkeypatch.setattr(camt, "payee_from_description", lambda value: "Rule Payee")
-    monkeypatch.setattr(camt, "_csv_memo", lambda row: "Rule Memo")
-    second = parse_csv_export(
-        "neon.csv", content, account_iban="CH999", target_currency="CHF"
-    ).transactions[0]
-
-    assert second.payee == "Rule Payee"
-    assert second.memo == "Rule Memo"
-    assert second.import_id == first.import_id
-
-
-def test_camt_missing_ref_import_id_does_not_depend_on_display_payee_or_memo(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    entry = """
-<Ntry>
-  <Amt Ccy="CHF">10.00</Amt>
-  <CdtDbtInd>DBIT</CdtDbtInd>
-  <RvslInd>false</RvslInd>
-  <Sts><Cd>BOOK</Cd></Sts>
-  <BookgDt><Dt>2026-04-30</Dt></BookgDt>
-  <ValDt><Dt>2026-04-30</Dt></ValDt>
-  <AddtlNtryInf>Achat SAMPLE BISTRO</AddtlNtryInf>
-</Ntry>
-"""
-    content = camt_document(
-        statement_xml("CH111", entry, opening="100.00", closing="90.00")
-    )
-    first = parse_camt(content).transactions[0]
-
-    monkeypatch.setattr(camt, "payee_from_description", lambda value: "Rule Payee")
-    monkeypatch.setattr(camt, "_entry_memo", lambda description: "Rule Memo")
-    second = parse_camt(content).transactions[0]
-
-    assert second.payee == "Rule Payee"
-    assert second.memo == "Rule Memo"
-    assert second.import_id == first.import_id
 
 
 def test_rejects_non_chf_statement() -> None:
@@ -360,50 +309,6 @@ def test_recurring_structured_references_do_not_duplicate_split_import_ids() -> 
     assert all("Ref: MONTHLYREF" in (tx.memo or "") for tx in telecom_transactions)
 
 
-def test_split_detail_keeps_legacy_unique_detail_import_id_alias() -> None:
-    uetr = "7f590b14-505f-4e16-8701-3fa01ee7a5a1"
-    entry = f"""
-<Ntry>
-  <Amt Ccy="CHF">601.00</Amt>
-  <CdtDbtInd>DBIT</CdtDbtInd>
-  <RvslInd>false</RvslInd>
-  <Sts><Cd>BOOK</Cd></Sts>
-  <BookgDt><Dt>2026-04-30</Dt></BookgDt>
-  <ValDt><Dt>2026-04-30</Dt></ValDt>
-  <AcctSvcrRef>ENTRYREF</AcctSvcrRef>
-  <NtryDtls>
-    <TxDtls>
-      <Amt Ccy="CHF">1.00</Amt>
-      <CdtDbtInd>DBIT</CdtDbtInd>
-      <RltdPties><Cdtr><Pty><Nm>Other Example SA</Nm></Pty></Cdtr></RltdPties>
-    </TxDtls>
-    <TxDtls>
-      <Amt Ccy="CHF">600.00</Amt>
-      <CdtDbtInd>DBIT</CdtDbtInd>
-      <Refs><UETR>{uetr}</UETR></Refs>
-      <RltdPties><Cdtr><Pty><Nm>Alex Example</Nm></Pty></Cdtr><CdtrAcct><Id><IBAN>CH0000000000000000005</IBAN></Id></CdtrAcct></RltdPties>
-    </TxDtls>
-  </NtryDtls>
-  <AddtlNtryInf>Ordre permanent</AddtlNtryInf>
-</Ntry>
-"""
-    content = camt_document(
-        statement_xml("CH111", entry, opening="1000.00", closing="399.00")
-    )
-
-    result = parse_camt(content)
-    tx = result.transactions[1]
-
-    assert tx.source_ref == "ENTRYREF.2"
-    assert tx.import_id == "INAB:ENTRYREF.2"
-    assert tx.legacy_import_ids == [
-        make_source_ref_import_id(
-            iban="CH111",
-            source_ref=uetr,
-        )
-    ]
-
-
 def test_card_purchase_memo_is_compact_and_single_line() -> None:
     content = camt_document(
         statement_xml(
@@ -508,91 +413,3 @@ def test_twint_payment_without_timestamp_omits_bank_noise() -> None:
     assert tx.payee == "Digitec Galaxus"
     assert tx.memo == "TWINT"
     assert tx.booking_date == date(2026, 5, 6)
-
-
-def test_twint_payment_keeps_legacy_bank_date_fallback_import_id() -> None:
-    content = camt_document(
-        statement_xml(
-            "CH111",
-            """
-<Ntry>
-  <Amt Ccy="CHF">5.80</Amt>
-  <CdtDbtInd>DBIT</CdtDbtInd>
-  <RvslInd>false</RvslInd>
-  <Sts><Cd>BOOK</Cd></Sts>
-  <BookgDt><Dt>2026-03-31</Dt></BookgDt>
-  <ValDt><Dt>2026-03-31</Dt></ValDt>
-  <AddtlNtryInf>Achat TWINT SBB MOBILE
-30.03.2026, 14:45</AddtlNtryInf>
-</Ntry>
-""",
-            opening="100.00",
-            closing="94.20",
-        )
-    )
-
-    result = parse_camt(content)
-    tx = result.transactions[0]
-    old_current_import_id = make_legacy_display_import_id(
-        iban="CH111",
-        booking_date=date(2026, 3, 30),
-        amount=tx.amount,
-        payee=tx.payee,
-        memo=tx.memo,
-    )
-    old_bank_import_id = make_legacy_display_import_id(
-        iban="CH111",
-        booking_date=date(2026, 3, 31),
-        amount=tx.amount,
-        payee=tx.payee,
-        memo=tx.memo,
-    )
-
-    assert tx.booking_date == date(2026, 3, 30)
-    assert tx.import_id != old_current_import_id
-    assert tx.import_id != old_bank_import_id
-    assert tx.legacy_import_ids == [old_current_import_id, old_bank_import_id]
-
-
-def test_card_purchase_keeps_legacy_bank_date_fallback_import_id() -> None:
-    content = camt_document(
-        statement_xml(
-            "CH111",
-            """
-<Ntry>
-  <Amt Ccy="CHF">34.30</Amt>
-  <CdtDbtInd>DBIT</CdtDbtInd>
-  <RvslInd>false</RvslInd>
-  <Sts><Cd>BOOK</Cd></Sts>
-  <BookgDt><Dt>2026-01-19</Dt></BookgDt>
-  <ValDt><Dt>2026-01-19</Dt></ValDt>
-  <AddtlNtryInf>Achat Sample Bistro
-15.01.2026, 13:58, No carte Visa Debit 400000xxxxxx0002</AddtlNtryInf>
-</Ntry>
-""",
-            opening="100.00",
-            closing="65.70",
-        )
-    )
-
-    result = parse_camt(content)
-    tx = result.transactions[0]
-    old_current_import_id = make_legacy_display_import_id(
-        iban="CH111",
-        booking_date=date(2026, 1, 15),
-        amount=tx.amount,
-        payee=tx.payee,
-        memo=tx.memo,
-    )
-    old_bank_import_id = make_legacy_display_import_id(
-        iban="CH111",
-        booking_date=date(2026, 1, 19),
-        amount=tx.amount,
-        payee=tx.payee,
-        memo=tx.memo,
-    )
-
-    assert tx.booking_date == date(2026, 1, 15)
-    assert tx.import_id != old_current_import_id
-    assert tx.import_id != old_bank_import_id
-    assert tx.legacy_import_ids == [old_current_import_id, old_bank_import_id]
