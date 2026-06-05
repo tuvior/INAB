@@ -1243,6 +1243,14 @@ tr:last-child td {
     padding: 10px 12px;
   }
 
+  .transaction-table.mobile-card-table tbody tr[data-status="ready"] {
+    box-shadow: inset 3px 0 0 #abefc6, var(--shadow);
+  }
+
+  .transaction-table.mobile-card-table tbody tr[data-status="ready"] td:first-child {
+    box-shadow: none;
+  }
+
   .mobile-card-table td {
     display: grid;
     grid-template-columns: minmax(96px, 36%) minmax(0, 1fr);
